@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Users,
   FileText,
+  Edit3,
 } from 'lucide-react';
 import {
   parseDurationToSeconds,
@@ -48,6 +49,7 @@ interface DispatchTimesheetMatrixProps {
   onToggleDayGroup?: (techName: string, dayName: WeekDay, group: 'COD') => void;
   searchTerm?: string;
   onSearchChange?: (term: string) => void;
+  onUpdateProjectNotes?: (projectId: string, notes: string) => void;
 }
 
 const REGION_ORDER = [
@@ -74,7 +76,27 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
   onToggleDayGroup,
   searchTerm = '',
   onSearchChange,
+  onUpdateProjectNotes,
 }) => {
+  // Notes Modal state for editing project notes directly from the card
+  const [notesModalProject, setNotesModalProject] = useState<Project | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState<string>('');
+
+  const handleOpenNotes = (e: React.MouseEvent, project: Project) => {
+    e.stopPropagation();
+    setNotesModalProject(project);
+    setEditingNoteText(project.schedulerNotes || '');
+  };
+
+  const handleSaveNote = () => {
+    if (!notesModalProject) return;
+    const trimmed = editingNoteText.trim();
+    if (onUpdateProjectNotes) {
+      onUpdateProjectNotes(notesModalProject.id, trimmed);
+    }
+    notesModalProject.schedulerNotes = trimmed;
+    setNotesModalProject(null);
+  };
   // Region filter: defaults to 'all' or specific region
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
 
@@ -882,7 +904,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         onClick={() => onSelectProject(p)}
                                         className="p-1.5 rounded text-[11px] border border-emerald-500/80 bg-emerald-50 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-100 dark:hover:bg-emerald-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        {/* Row 1: Badges ON TOP (INSTALL, COD, PRIORITY) + Equipment Delta */}
+                                        {/* Row 1: Badges ON TOP (INSTALL, COD, PRIORITY) */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
                                           <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
@@ -899,16 +921,14 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                               INSTALL
                                             </span>
                                           </div>
-
-                                          <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300 font-bold shrink-0">
-                                            {p.equipmentCount > 0 ? `-${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
-                                          </span>
                                         </div>
 
-                                        {/* Row 2: Project Number with Full Space (No longer cramped by INSTALL) */}
+                                        {/* Row 2: Project Number with Full Space */}
                                         <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
                                           <ArrowDownCircle className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                                          <span className="truncate text-[11px]" title={p.id}>{p.id}</span>
+                                          <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
+                                            {p.id}
+                                          </span>
                                         </div>
 
                                         {/* Row 3: Co-assigned technicians if any */}
@@ -923,20 +943,34 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                           </div>
                                         )}
 
-                                        {/* Row 4: City / State / Location & Notes */}
+                                        {/* Row 4: Replace location with option to add notes (Left) + Equipment count (Right) */}
                                         <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
-                                          <span className="text-emerald-700 dark:text-emerald-300 font-medium truncate">
-                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
-                                          </span>
-                                          {p.schedulerNotes && (
-                                            <span
-                                              className="text-[8.5px] text-amber-700 dark:text-amber-300 truncate max-w-[90px] flex items-center gap-0.5 shrink-0"
-                                              title={p.schedulerNotes}
+                                          {p.schedulerNotes ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenNotes(e, p)}
+                                              title={`Note: ${p.schedulerNotes} (Click to edit)`}
+                                              className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
                                             >
-                                              <FileText className="w-2 h-2 shrink-0 text-amber-500" />
-                                              <span className="truncate">{p.schedulerNotes}</span>
-                                            </span>
+                                              <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                                              <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
+                                              <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenNotes(e, p)}
+                                              title="Add note for this project"
+                                              className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
+                                            >
+                                              <FileText className="w-2.5 h-2.5 shrink-0" />
+                                              <span>+ Add Note</span>
+                                            </button>
                                           )}
+
+                                          <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300 font-bold shrink-0 ml-auto">
+                                            {p.equipmentCount > 0 ? `-${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
+                                          </span>
                                         </div>
                                       </div>
                                     );
@@ -956,7 +990,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         onClick={() => onSelectProject(p)}
                                         className="p-1.5 rounded text-[11px] border border-sky-500/80 bg-sky-50 dark:bg-sky-950/90 text-sky-950 dark:text-sky-100 hover:bg-sky-100 dark:hover:bg-sky-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        {/* Row 1: Badges ON TOP (SWAP, COD, PRIORITY) + Equipment Delta */}
+                                        {/* Row 1: Badges ON TOP (SWAP, COD, PRIORITY) */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
                                           <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
@@ -973,16 +1007,14 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                               SWAP
                                             </span>
                                           </div>
-
-                                          <span className="font-mono text-[10px] text-sky-700 dark:text-sky-300 font-bold shrink-0">
-                                            {p.equipmentCount > 0 ? `⇄ ${p.equipmentCount} CAMS` : ''}
-                                          </span>
                                         </div>
 
                                         {/* Row 2: Project Number with Full Space */}
                                         <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
                                           <RefreshCw className="w-2.5 h-2.5 text-sky-600 dark:text-sky-400 shrink-0" />
-                                          <span className="truncate text-[11px]" title={p.id}>{p.id}</span>
+                                          <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
+                                            {p.id}
+                                          </span>
                                         </div>
 
                                         {/* Row 3: Co-assigned technicians if any */}
@@ -997,20 +1029,34 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                           </div>
                                         )}
 
-                                        {/* Row 4: City / State / Location & Notes */}
+                                        {/* Row 4: Replace location with option to add notes (Left) + Equipment count (Right) */}
                                         <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
-                                          <span className="text-sky-700 dark:text-sky-300 font-medium truncate">
-                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
-                                          </span>
-                                          {p.schedulerNotes && (
-                                            <span
-                                              className="text-[8.5px] text-amber-700 dark:text-amber-300 truncate max-w-[90px] flex items-center gap-0.5 shrink-0"
-                                              title={p.schedulerNotes}
+                                          {p.schedulerNotes ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenNotes(e, p)}
+                                              title={`Note: ${p.schedulerNotes} (Click to edit)`}
+                                              className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
                                             >
-                                              <FileText className="w-2 h-2 shrink-0 text-amber-500" />
-                                              <span className="truncate">{p.schedulerNotes}</span>
-                                            </span>
+                                              <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                                              <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
+                                              <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenNotes(e, p)}
+                                              title="Add note for this project"
+                                              className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
+                                            >
+                                              <FileText className="w-2.5 h-2.5 shrink-0" />
+                                              <span>+ Add Note</span>
+                                            </button>
                                           )}
+
+                                          <span className="font-mono text-[10px] text-sky-700 dark:text-sky-300 font-bold shrink-0 ml-auto">
+                                            {p.equipmentCount > 0 ? `⇄ ${p.equipmentCount} CAMS` : ''}
+                                          </span>
                                         </div>
                                       </div>
                                     );
@@ -1030,7 +1076,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         onClick={() => onSelectProject(p)}
                                         className="p-1.5 rounded text-[11px] border border-violet-500/80 bg-violet-50 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-100 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) + Equipment Delta */}
+                                        {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
                                           <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
@@ -1056,16 +1102,14 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                               </span>
                                             )}
                                           </div>
-
-                                          <span className="font-mono text-[10px] text-violet-700 dark:text-violet-300 font-bold shrink-0">
-                                            {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
-                                          </span>
                                         </div>
 
                                         {/* Row 2: Project Number with Full Space */}
                                         <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
                                           <ArrowUpCircle className="w-2.5 h-2.5 text-violet-600 dark:text-violet-400 shrink-0" />
-                                          <span className="truncate text-[11px]" title={p.id}>{p.id}</span>
+                                          <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
+                                            {p.id}
+                                          </span>
                                         </div>
 
                                         {/* Row 3: Co-assigned technicians if any */}
@@ -1080,20 +1124,34 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                           </div>
                                         )}
 
-                                        {/* Row 4: City / State / Location & Notes */}
+                                        {/* Row 4: Replace location with option to add notes (Left) + Equipment count (Right) */}
                                         <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
-                                          <span className="text-violet-700 dark:text-violet-300 font-medium truncate">
-                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
-                                          </span>
-                                          {p.schedulerNotes && (
-                                            <span
-                                              className="text-[8.5px] text-amber-700 dark:text-amber-300 truncate max-w-[90px] flex items-center gap-0.5 shrink-0"
-                                              title={p.schedulerNotes}
+                                          {p.schedulerNotes ? (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenNotes(e, p)}
+                                              title={`Note: ${p.schedulerNotes} (Click to edit)`}
+                                              className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
                                             >
-                                              <FileText className="w-2 h-2 shrink-0 text-amber-500" />
-                                              <span className="truncate">{p.schedulerNotes}</span>
-                                            </span>
+                                              <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                                              <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
+                                              <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleOpenNotes(e, p)}
+                                              title="Add note for this project"
+                                              className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
+                                            >
+                                              <FileText className="w-2.5 h-2.5 shrink-0" />
+                                              <span>+ Add Note</span>
+                                            </button>
                                           )}
+
+                                          <span className="font-mono text-[10px] text-violet-700 dark:text-violet-300 font-bold shrink-0 ml-auto">
+                                            {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
+                                          </span>
                                         </div>
                                       </div>
                                     );
@@ -1150,6 +1208,116 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           </tfoot>
         </table>
       </div>
+
+      {/* Notes Modal for Dispatch View */}
+      {notesModalProject && (
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+          onClick={() => setNotesModalProject(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                    <span>Notes: {notesModalProject.id}</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {notesModalProject.cityState || notesModalProject.studyType} • Tech: {notesModalProject.technician}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNotesModalProject(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Project & Field Notes</span>
+                  <span className="text-[10px] text-slate-500 font-normal">Press Ctrl+Enter to save</span>
+                </label>
+                <textarea
+                  autoFocus
+                  rows={4}
+                  value={editingNoteText}
+                  onChange={(e) => setEditingNoteText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveNote();
+                    }
+                  }}
+                  placeholder="Add notes for this project (e.g. Collecting 9/3; Teardown 24 hrs; Gate code #1234; Client contact...)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-sans resize-none"
+                />
+              </div>
+
+              {/* Quick Suggestion Chips */}
+              <div className="flex flex-wrap gap-1.5">
+                <span className="text-[10px] text-slate-400 flex items-center">Quick Add:</span>
+                {['Collecting this week', 'Teardown 24 hrs', 'Gate code needed', 'Contact client on arrival', 'Recollection'].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => {
+                      setEditingNoteText((prev) => (prev ? `${prev}; ${chip}` : chip));
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 transition-colors cursor-pointer"
+                  >
+                    +{chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-3.5 border-t border-slate-800 bg-slate-950/40">
+              <div>
+                {notesModalProject.schedulerNotes && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingNoteText('')}
+                    className="text-xs text-rose-400 hover:text-rose-300 hover:underline px-1 py-0.5 cursor-pointer"
+                  >
+                    Clear Note
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNotesModalProject(null)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveNote}
+                  className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-500 shadow-md transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save Note</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
