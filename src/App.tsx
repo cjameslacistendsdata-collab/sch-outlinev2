@@ -736,6 +736,23 @@ export default function App() {
     showToast(`Saved changes for project ${updated.id}`);
   };
 
+  const handleUpdateProjectNotes = (projectId: string, notes: string) => {
+    const updateFn = (prev: Project[]) =>
+      prev.map((p) => {
+        if (p.id === projectId) {
+          return {
+            ...p,
+            schedulerNotes: notes,
+            lastUpdated: new Date().toISOString(),
+          };
+        }
+        return p;
+      });
+    setSchedulingProjects(updateFn);
+    setMonitoringProjects(updateFn);
+    showToast(notes ? `Saved note for project ${projectId}` : `Cleared note for project ${projectId}`);
+  };
+
   const handleAddProject = (newProject: Project) => {
     const projectWithRegion: Project = {
       ...newProject,
@@ -1541,6 +1558,7 @@ export default function App() {
             onToggleDayGroup={handleToggleDayGroup}
             allowCOD={allowCOD}
             searchTerm={searchTerm}
+            onUpdateProjectNotes={handleUpdateProjectNotes}
             specialAssignments={specialAssignments}
             onUpdateSpecialAssignmentEquipment={handleUpdateSpecialAssignmentEquipment}
             onSetSpecialAssignment={handleSetSpecialAssignment}
