@@ -18,6 +18,7 @@ import {
   ArrowUpCircle,
   RefreshCw,
   Users,
+  FileText,
 } from 'lucide-react';
 import {
   parseDurationToSeconds,
@@ -30,7 +31,7 @@ import {
 import { exportProjectsToCSV, WEEK_DAYS } from '../utils/statusEngine';
 import { getTechOverallEquipmentStats } from '../utils/equipmentEngine';
 import { shouldShowProjectEventOnDay, isTeardownRollover } from '../utils/workWeekEngine';
-import { getIndividualTechList, isProjectAssignedToTech } from '../utils/technicianUtils';
+import { getIndividualTechList, isProjectAssignedToTech, splitTechnicianNames } from '../utils/technicianUtils';
 
 interface DispatchTimesheetMatrixProps {
   projects: Project[];
@@ -870,20 +871,20 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                   {/* Installs (Green) */}
                                   {installs.map((p) => {
                                     const pGroup = p.group || p.specialBadge;
+                                    const assignedTechs = splitTechnicianNames(p.technician);
+                                    const coTechs = assignedTechs.filter(
+                                      (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
+                                    );
 
                                     return (
                                       <div
                                         key={`inst-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-emerald-500/80 bg-emerald-950/90 text-emerald-100 hover:bg-emerald-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className="p-1.5 rounded text-[11px] border border-emerald-500/80 bg-emerald-50 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-100 dark:hover:bg-emerald-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        <div className="flex items-center justify-between gap-1">
-                                          <span className="flex items-center gap-1 font-mono font-bold text-white truncate">
-                                            <ArrowDownCircle className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                                            <span>{p.id}</span>
-                                          </span>
-
-                                          <div className="flex items-center gap-1 shrink-0">
+                                        {/* Row 1: Badges ON TOP (INSTALL, COD, PRIORITY) + Equipment Delta */}
+                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                          <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
                                               <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-xs">
                                                 COD
@@ -894,19 +895,48 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                                 PRIORITY
                                               </span>
                                             )}
-                                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-emerald-600 text-white tracking-wider">
+                                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-emerald-600 text-white tracking-wider font-bold shadow-xs">
                                               INSTALL
                                             </span>
                                           </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between text-[10px]">
-                                          <span className="text-emerald-300 font-semibold truncate max-w-[95px]">
-                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
-                                          </span>
-                                          <span className="font-mono text-[10px] text-emerald-300 font-bold">
+                                          <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300 font-bold shrink-0">
                                             {p.equipmentCount > 0 ? `-${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
                                           </span>
+                                        </div>
+
+                                        {/* Row 2: Project Number with Full Space (No longer cramped by INSTALL) */}
+                                        <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
+                                          <ArrowDownCircle className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                          <span className="truncate text-[11px]" title={p.id}>{p.id}</span>
+                                        </div>
+
+                                        {/* Row 3: Co-assigned technicians if any */}
+                                        {coTechs.length > 0 && (
+                                          <div className="flex items-center mt-0.5">
+                                            <span
+                                              title={`Co-assigned with ${coTechs.join(', ')}`}
+                                              className="px-1 py-0.2 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
+                                            >
+                                              👥 Co: {coTechs.join(', ')}
+                                            </span>
+                                          </div>
+                                        )}
+
+                                        {/* Row 4: City / State / Location & Notes */}
+                                        <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
+                                          <span className="text-emerald-700 dark:text-emerald-300 font-medium truncate">
+                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
+                                          </span>
+                                          {p.schedulerNotes && (
+                                            <span
+                                              className="text-[8.5px] text-amber-700 dark:text-amber-300 truncate max-w-[90px] flex items-center gap-0.5 shrink-0"
+                                              title={p.schedulerNotes}
+                                            >
+                                              <FileText className="w-2 h-2 shrink-0 text-amber-500" />
+                                              <span className="truncate">{p.schedulerNotes}</span>
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     );
@@ -915,20 +945,20 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                   {/* Battery Swaps (Sky Blue) */}
                                   {batterySwaps.map((p) => {
                                     const pGroup = p.group || p.specialBadge;
+                                    const assignedTechs = splitTechnicianNames(p.technician);
+                                    const coTechs = assignedTechs.filter(
+                                      (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
+                                    );
 
                                     return (
                                       <div
                                         key={`bat-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-sky-500/80 bg-sky-950/90 text-sky-100 hover:bg-sky-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className="p-1.5 rounded text-[11px] border border-sky-500/80 bg-sky-50 dark:bg-sky-950/90 text-sky-950 dark:text-sky-100 hover:bg-sky-100 dark:hover:bg-sky-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        <div className="flex items-center justify-between gap-1">
-                                          <span className="flex items-center gap-1 font-mono font-bold text-white truncate">
-                                            <RefreshCw className="w-2.5 h-2.5 text-sky-400 shrink-0" />
-                                            <span>{p.id}</span>
-                                          </span>
-
-                                          <div className="flex items-center gap-1 shrink-0">
+                                        {/* Row 1: Badges ON TOP (SWAP, COD, PRIORITY) + Equipment Delta */}
+                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                          <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
                                               <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-xs">
                                                 COD
@@ -939,19 +969,48 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                                 PRIORITY
                                               </span>
                                             )}
-                                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500 text-slate-950 tracking-wider font-bold">
+                                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500 text-slate-950 tracking-wider font-bold shadow-xs">
                                               SWAP
                                             </span>
                                           </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between text-[10px]">
-                                          <span className="text-sky-300 font-semibold truncate max-w-[95px]">
-                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
-                                          </span>
-                                          <span className="font-mono text-[10px] text-sky-300 font-bold">
+                                          <span className="font-mono text-[10px] text-sky-700 dark:text-sky-300 font-bold shrink-0">
                                             {p.equipmentCount > 0 ? `⇄ ${p.equipmentCount} CAMS` : ''}
                                           </span>
+                                        </div>
+
+                                        {/* Row 2: Project Number with Full Space */}
+                                        <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
+                                          <RefreshCw className="w-2.5 h-2.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                                          <span className="truncate text-[11px]" title={p.id}>{p.id}</span>
+                                        </div>
+
+                                        {/* Row 3: Co-assigned technicians if any */}
+                                        {coTechs.length > 0 && (
+                                          <div className="flex items-center mt-0.5">
+                                            <span
+                                              title={`Co-assigned with ${coTechs.join(', ')}`}
+                                              className="px-1 py-0.2 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
+                                            >
+                                              👥 Co: {coTechs.join(', ')}
+                                            </span>
+                                          </div>
+                                        )}
+
+                                        {/* Row 4: City / State / Location & Notes */}
+                                        <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
+                                          <span className="text-sky-700 dark:text-sky-300 font-medium truncate">
+                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
+                                          </span>
+                                          {p.schedulerNotes && (
+                                            <span
+                                              className="text-[8.5px] text-amber-700 dark:text-amber-300 truncate max-w-[90px] flex items-center gap-0.5 shrink-0"
+                                              title={p.schedulerNotes}
+                                            >
+                                              <FileText className="w-2 h-2 shrink-0 text-amber-500" />
+                                              <span className="truncate">{p.schedulerNotes}</span>
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     );
@@ -960,20 +1019,20 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                   {/* Teardowns (Violet) */}
                                   {teardowns.map((p) => {
                                     const pGroup = p.group || p.specialBadge;
+                                    const assignedTechs = splitTechnicianNames(p.technician);
+                                    const coTechs = assignedTechs.filter(
+                                      (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
+                                    );
 
                                     return (
                                       <div
                                         key={`td-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-violet-500/80 bg-violet-950/90 text-violet-100 hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className="p-1.5 rounded text-[11px] border border-violet-500/80 bg-violet-50 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-100 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        <div className="flex items-center justify-between gap-1">
-                                          <span className="flex items-center gap-1 font-mono font-bold text-white truncate">
-                                            <ArrowUpCircle className="w-2.5 h-2.5 text-violet-400 shrink-0" />
-                                            <span>{p.id}</span>
-                                          </span>
-
-                                          <div className="flex items-center gap-1 shrink-0">
+                                        {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) + Equipment Delta */}
+                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                          <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
                                               <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-xs">
                                                 COD
@@ -987,25 +1046,54 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                             {isTeardownRollover(p) ? (
                                               <span
                                                 title={`Rollover Teardown from previous week install on ${p.installDay}`}
-                                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-700 text-white tracking-wider border border-violet-400/60"
+                                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-700 text-white tracking-wider border border-violet-400/60 shadow-xs"
                                               >
                                                 ROLLOVER TD 🔄
                                               </span>
                                             ) : (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-600 text-white tracking-wider">
+                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-600 text-white tracking-wider font-bold shadow-xs">
                                                 TEARDOWN
                                               </span>
                                             )}
                                           </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between text-[10px]">
-                                          <span className="text-violet-300 font-semibold truncate max-w-[95px]">
-                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
-                                          </span>
-                                          <span className="font-mono text-[10px] text-violet-300 font-bold">
+                                          <span className="font-mono text-[10px] text-violet-700 dark:text-violet-300 font-bold shrink-0">
                                             {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
                                           </span>
+                                        </div>
+
+                                        {/* Row 2: Project Number with Full Space */}
+                                        <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
+                                          <ArrowUpCircle className="w-2.5 h-2.5 text-violet-600 dark:text-violet-400 shrink-0" />
+                                          <span className="truncate text-[11px]" title={p.id}>{p.id}</span>
+                                        </div>
+
+                                        {/* Row 3: Co-assigned technicians if any */}
+                                        {coTechs.length > 0 && (
+                                          <div className="flex items-center mt-0.5">
+                                            <span
+                                              title={`Co-assigned with ${coTechs.join(', ')}`}
+                                              className="px-1 py-0.2 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
+                                            >
+                                              👥 Co: {coTechs.join(', ')}
+                                            </span>
+                                          </div>
+                                        )}
+
+                                        {/* Row 4: City / State / Location & Notes */}
+                                        <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
+                                          <span className="text-violet-700 dark:text-violet-300 font-medium truncate">
+                                            {p.cityState ? p.cityState.split(',')[0] : p.studyType || 'TMC'}
+                                          </span>
+                                          {p.schedulerNotes && (
+                                            <span
+                                              className="text-[8.5px] text-amber-700 dark:text-amber-300 truncate max-w-[90px] flex items-center gap-0.5 shrink-0"
+                                              title={p.schedulerNotes}
+                                            >
+                                              <FileText className="w-2 h-2 shrink-0 text-amber-500" />
+                                              <span className="truncate">{p.schedulerNotes}</span>
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
                                     );
