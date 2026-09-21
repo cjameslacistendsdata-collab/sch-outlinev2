@@ -1524,6 +1524,7 @@ export default function App() {
             searchTerm={searchTerm}
             onSearchChange={setSearchTerm}
             onOpenResetSchedule={() => setIsResetScheduleModalOpen(true)}
+            onUpdateProjectNotes={handleUpdateProjectNotes}
           />
         )}
 
