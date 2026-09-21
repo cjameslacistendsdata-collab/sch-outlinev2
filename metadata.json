@@ -1,0 +1,6 @@
+{
+  "name": "Field Ops Scheduler & Monitoring Sheet",
+  "description": "Dynamic field study scheduler, technician dispatch matrix, and automated workflow monitoring dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
