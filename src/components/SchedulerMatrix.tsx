@@ -45,6 +45,8 @@ import {
   UploadCloud,
   RotateCcw,
   BatteryCharging,
+  FileText,
+  Check,
 } from 'lucide-react';
 
 interface SchedulerMatrixProps {
@@ -65,6 +67,7 @@ interface SchedulerMatrixProps {
   onAutoSyncAllStatuses?: () => void;
   onOpenResetSchedule?: () => void;
   onUpdateProjectGroup?: (projectId: string, group: string | null) => void;
+  onUpdateProjectNotes?: (projectId: string, notes: string) => void;
   onSelectProject: (project: Project) => void;
   onAssignProjectToDay: (techName: string, day: WeekDay) => void;
   onApplyBatterySwaps?: (projectId: string, durationDays: number) => void;
@@ -118,6 +121,7 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
   onAutoSyncAllStatuses,
   onOpenResetSchedule,
   onUpdateProjectGroup,
+  onUpdateProjectNotes,
   onAssignCODForTech,
   onOpenAssignCOD,
   onUpdateCodListName,
@@ -142,6 +146,42 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
   const [activityFilter, setActivityFilter] = useState<'all' | 'install' | 'battery_swap' | 'teardown'>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [expandedCodGroups, setExpandedCodGroups] = useState<Set<string>>(new Set());
+  const [notesModalProject, setNotesModalProject] = useState<Project | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState<string>('');
+
+  const handleSaveNote = () => {
+    if (!notesModalProject) return;
+    const trimmed = editingNoteText.trim();
+    if (onUpdateProjectNotes) {
+      onUpdateProjectNotes(notesModalProject.id, trimmed);
+    }
+    // Also update locally on project object reference for immediate UI response
+    notesModalProject.schedulerNotes = trimmed;
+    setNotesModalProject(null);
+  };
+
+  const getDisplayProjectHeader = (proj: Project) => {
+    const id = (proj.id || '').trim();
+    const rawCity = (proj.cityState && proj.cityState !== 'Unspecified') ? proj.cityState.trim() : '';
+
+    // Match patterns like "26-260111 City, ST"
+    const match = id.match(/^(\d{2}-\d{4,6}[A-Za-z0-9\-_]*)\s+(.+)$/);
+    if (match) {
+      return {
+        projectNumber: match[1],
+        city: match[2],
+      };
+    }
+
+    if (rawCity) {
+      if (id.toLowerCase().includes(rawCity.toLowerCase())) {
+        return { projectNumber: id, city: '' };
+      }
+      return { projectNumber: id, city: rawCity };
+    }
+
+    return { projectNumber: id, city: '' };
+  };
 
   const toggleCodGroup = (groupId: string) => {
     setExpandedCodGroups((prev) => {
@@ -937,149 +977,180 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                       onMouseLeave={() => setHoveredProject(null)}
                                       className={`group/item cursor-pointer p-1.5 rounded-lg border text-xs font-mono transition-all shadow-sm ${cardTheme}`}
                                     >
-                                      {/* Line 1: Project # and Activity / Group Badges */}
-                                      <div className="flex items-center justify-between gap-1">
-                                        <div className="flex items-center gap-1.5 truncate">
-                                          <span
-                                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                              isHighlighted ? 'bg-slate-950' : (badge?.dot || 'bg-slate-400')
-                                            }`}
-                                          ></span>
-                                          <span className="font-bold tracking-tight text-white">
-                                            {proj.id}
-                                          </span>
-                                        </div>
-
-                                        <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                                          {/* Group Badge (COD / PRIORITY) */}
-                                          {allowCOD && (proj.group === 'COD' || proj.specialBadge === 'COD') && (
-                                            <span
-                                              title="Group: COD"
-                                              className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-sm"
-                                            >
-                                              COD
-                                            </span>
-                                          )}
-                                          {proj.group === 'PRIORITY' && (
-                                            <span
-                                              title="Group: Priority"
-                                              className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-purple-600 text-white tracking-wider shadow-sm"
-                                            >
-                                              PRIORITY
-                                            </span>
-                                          )}
-
-                                          {/* INSTALL Badge: GREEN (Removes Equipment) */}
-                                          {isInstall && (
-                                            <span
-                                              title={`Install Day (${day.dayName}) - Removes ${proj.equipmentCount} ${equipType} from inventory`}
-                                              className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-emerald-600 text-white tracking-wider shadow-sm"
-                                            >
-                                              INSTALL
-                                            </span>
-                                          )}
-
-                                          {/* BATTERY SWAP Badge: SKY BLUE */}
-                                          {isBatterySwap && (() => {
-                                            const sIdx = proj.batterySwapDays ? proj.batterySwapDays.indexOf(day.dayName) : -1;
-                                            const totalSwaps = proj.batterySwapDays?.length || 1;
-                                            return (
-                                              <span
-                                                title={`Battery Swap Day (${day.dayName}) - Swap ${sIdx >= 0 ? sIdx + 1 : 1} of ${totalSwaps}`}
-                                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500 text-slate-950 tracking-wider shadow-sm font-bold flex items-center gap-1"
-                                              >
-                                                <span>SWAP</span>
-                                                {sIdx >= 0 && totalSwaps > 1 && (
-                                                  <span className="text-[7px] opacity-90">{sIdx + 1}/{totalSwaps}</span>
-                                                )}
-                                              </span>
-                                            );
-                                          })()}
-
-                                          {/* TEARDOWN Badge: VIOLET (Adds Equipment Back) */}
-                                          {isTeardown && (
-                                            <span
-                                              title={`Teardown Day (${day.dayName}) - Returns ${proj.equipmentCount} ${equipType} back to inventory`}
-                                              className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-600 text-white tracking-wider shadow-sm"
-                                            >
-                                              TEARDOWN
-                                            </span>
-                                          )}
-
-                                          {/* Co-Assigned Badge if multiple technicians */}
-                                          {(() => {
-                                            const assignedTechs = splitTechnicianNames(proj.technician);
-                                            const coTechs = assignedTechs.filter(
-                                              (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
-                                            );
-                                            if (coTechs.length > 0) {
-                                              return (
-                                                <span
-                                                  title={`Co-assigned with ${coTechs.join(', ')}`}
-                                                  className="px-1.5 py-0.2 rounded text-[8px] font-semibold bg-cyan-950/80 text-cyan-300 border border-cyan-500/40 tracking-tight flex items-center gap-0.5"
-                                                >
-                                                  <span>👥</span>
-                                                  <span className="truncate max-w-[55px]">{coTechs.join(', ')}</span>
-                                                </span>
-                                              );
-                                            }
-                                            return null;
-                                          })()}
-                                        </div>
-                                      </div>
-
-                                      {/* Line 2: City & Equipment Units */}
+                                      {/* Card Content */}
                                       {(() => {
                                         const techUnits = getTechUnitsForProject(proj, tech.name);
+                                        const durLabel = proj.consecutiveCollectionDays ? `${proj.consecutiveCollectionDays}d` : '';
                                         const techLocs = (proj.techLocations && proj.techLocations[tech.name]) || proj.locationIds || (proj.locationId ? [proj.locationId] : []);
                                         const locLabel = techLocs.length > 0 ? (techLocs.length === 1 ? `Loc ${techLocs[0]}` : `${techLocs.length} Locs`) : (proj.locationsCount > 1 ? `${proj.locationsCount} Locs` : '');
-                                        const durLabel = proj.consecutiveCollectionDays ? `${proj.consecutiveCollectionDays}d` : '';
+                                        const { projectNumber, city } = getDisplayProjectHeader(proj);
+                                        const assignedTechs = splitTechnicianNames(proj.technician);
+                                        const coTechs = assignedTechs.filter(
+                                          (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
+                                        );
 
                                         return (
                                           <>
-                                            <div className="mt-1 flex items-center justify-between text-[10px] pt-1 border-t border-white/10">
-                                              <span className="truncate text-slate-300 text-[10px] font-sans">
-                                                {proj.cityState.split(',')[0]}
-                                              </span>
-
-                                              {/* Explicit Equipment units assigned to this tech */}
-                                              {isInstall && (
-                                                <span className="text-emerald-300 font-bold font-mono flex items-center gap-0.5">
-                                                  <span>-{techUnits}</span>
-                                                  <span>{equipType === 'Camera' ? 'Cam' : 'Mach'}</span>
-                                                </span>
-                                              )}
-
-                                              {isBatterySwap && (
-                                                <span className="text-sky-300 font-bold font-mono flex items-center gap-0.5">
-                                                  <span>⇄ {techUnits}</span>
-                                                  <span>Swap</span>
-                                                </span>
-                                              )}
-
-                                              {isTeardown && (
-                                                <span className="text-violet-300 font-bold font-mono flex items-center gap-0.5">
-                                                  <span>+{techUnits}</span>
-                                                  <span>{equipType === 'Camera' ? 'Cam' : 'Mach'}</span>
-                                                </span>
-                                              )}
-                                            </div>
-
-                                            {/* Line 3: Location ID and Duration details */}
-                                            {(locLabel || durLabel) && (
-                                              <div className="flex items-center justify-between text-[9px] text-slate-300/90 font-mono mt-0.5">
-                                                {locLabel && (
-                                                  <span className="truncate max-w-[85px] bg-slate-900/80 px-1 py-0.2 rounded border border-white/10" title={`Designated Location: ${proj.locationId || locLabel}`}>
-                                                    {locLabel}
+                                            {/* Row 1: Activity Badges (INSTALL, SWAP, TEARDOWN, COD) on TOP of the Project Number */}
+                                            <div className="flex items-center justify-between gap-1 mb-1">
+                                              <div className="flex items-center gap-1 shrink-0 flex-wrap">
+                                                {/* Group Badge (COD / PRIORITY) */}
+                                                {allowCOD && (proj.group === 'COD' || proj.specialBadge === 'COD') && (
+                                                  <span
+                                                    title="Group: COD"
+                                                    className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-sm"
+                                                  >
+                                                    COD
                                                   </span>
                                                 )}
-                                                {durLabel && (
-                                                  <span className="text-amber-300/90 font-semibold ml-auto" title={`Duration: ${durLabel} consecutive collection days`}>
-                                                    ⏱ {durLabel}
+                                                {proj.group === 'PRIORITY' && (
+                                                  <span
+                                                    title="Group: Priority"
+                                                    className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-purple-600 text-white tracking-wider shadow-sm"
+                                                  >
+                                                    PRIORITY
+                                                  </span>
+                                                )}
+
+                                                {/* INSTALL Badge: GREEN */}
+                                                {isInstall && (
+                                                  <span
+                                                    title={`Install Day (${day.dayName}) - Removes ${proj.equipmentCount} ${equipType} from inventory`}
+                                                    className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-emerald-600 text-white tracking-wider shadow-sm"
+                                                  >
+                                                    INSTALL
+                                                  </span>
+                                                )}
+
+                                                {/* BATTERY SWAP Badge: SKY BLUE */}
+                                                {isBatterySwap && (() => {
+                                                  const sIdx = proj.batterySwapDays ? proj.batterySwapDays.indexOf(day.dayName) : -1;
+                                                  const totalSwaps = proj.batterySwapDays?.length || 1;
+                                                  return (
+                                                    <span
+                                                      title={`Battery Swap Day (${day.dayName}) - Swap ${sIdx >= 0 ? sIdx + 1 : 1} of ${totalSwaps}`}
+                                                      className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500 text-slate-950 tracking-wider shadow-sm font-bold flex items-center gap-1"
+                                                    >
+                                                      <span>SWAP</span>
+                                                      {sIdx >= 0 && totalSwaps > 1 && (
+                                                        <span className="text-[7px] opacity-90">{sIdx + 1}/{totalSwaps}</span>
+                                                      )}
+                                                    </span>
+                                                  );
+                                                })()}
+
+                                                {/* TEARDOWN Badge: VIOLET */}
+                                                {isTeardown && (
+                                                  <span
+                                                    title={`Teardown Day (${day.dayName}) - Returns ${proj.equipmentCount} ${equipType} back to inventory`}
+                                                    className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-600 text-white tracking-wider shadow-sm"
+                                                  >
+                                                    TEARDOWN
                                                   </span>
                                                 )}
                                               </div>
+
+                                              {/* Equipment Delta Units & Duration on the top-right */}
+                                              <div className="flex items-center gap-1 shrink-0 text-[10px] font-bold font-mono">
+                                                {isInstall && (
+                                                  <span className="text-emerald-300 flex items-center gap-0.5">
+                                                    <span>-{techUnits}</span>
+                                                    <span>{equipType === 'Camera' ? 'Cam' : 'Mach'}</span>
+                                                  </span>
+                                                )}
+                                                {isBatterySwap && (
+                                                  <span className="text-sky-300 flex items-center gap-0.5">
+                                                    <span>⇄ {techUnits}</span>
+                                                    <span>Swap</span>
+                                                  </span>
+                                                )}
+                                                {isTeardown && (
+                                                  <span className="text-violet-300 flex items-center gap-0.5">
+                                                    <span>+{techUnits}</span>
+                                                    <span>{equipType === 'Camera' ? 'Cam' : 'Mach'}</span>
+                                                  </span>
+                                                )}
+                                                {durLabel && (
+                                                  <span className="text-amber-300/90 font-semibold ml-0.5" title={`Duration: ${durLabel} consecutive collection days`}>
+                                                    ⏱{durLabel}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+
+                                            {/* Row 2: Project Number and City, State (Plenty of space to be seen) */}
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <span
+                                                className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                                  isHighlighted ? 'bg-slate-950' : (badge?.dot || 'bg-slate-400')
+                                                }`}
+                                              ></span>
+                                              <div className="min-w-0 flex-1 flex items-baseline gap-1.5 flex-wrap">
+                                                <span className="font-bold tracking-tight text-white text-[11px] truncate" title={proj.id}>
+                                                  {projectNumber}
+                                                </span>
+                                                {city && (
+                                                  <span className="text-slate-200 text-[10px] font-sans truncate font-medium" title={city}>
+                                                    {city}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+
+                                            {/* Row 3: Co-assigned with placed below the project number */}
+                                            {coTechs.length > 0 && (
+                                              <div className="mt-1 flex items-center">
+                                                <span
+                                                  title={`Co-assigned with ${coTechs.join(', ')}`}
+                                                  className="px-1.5 py-0.5 rounded text-[8px] font-semibold bg-cyan-950/90 text-cyan-300 border border-cyan-500/50 tracking-tight flex items-center gap-1 max-w-full truncate shadow-xs"
+                                                >
+                                                  <span className="text-[9px]">👥</span>
+                                                  <span className="truncate">Co-assigned with: {coTechs.join(', ')}</span>
+                                                </span>
+                                              </div>
                                             )}
+
+                                            {/* Row 4: Replace location below with Option to add/edit notes */}
+                                            <div className="mt-1 pt-1 border-t border-white/10 flex items-center justify-between gap-1">
+                                              {proj.schedulerNotes ? (
+                                                <div
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setNotesModalProject(proj);
+                                                    setEditingNoteText(proj.schedulerNotes || '');
+                                                  }}
+                                                  title={`Note: ${proj.schedulerNotes} (Click to edit)`}
+                                                  className="flex-1 min-w-0 flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-200 border border-amber-500/40 hover:bg-amber-900/70 hover:border-amber-400 transition-colors cursor-pointer group/note"
+                                                >
+                                                  <FileText className="w-2.5 h-2.5 shrink-0 text-amber-400" />
+                                                  <span className="truncate flex-1 font-sans font-normal">{proj.schedulerNotes}</span>
+                                                  <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-300" />
+                                                </div>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setNotesModalProject(proj);
+                                                    setEditingNoteText('');
+                                                  }}
+                                                  className="flex items-center gap-1 text-[8px] text-slate-400 hover:text-cyan-300 hover:bg-slate-800/80 px-1.5 py-0.5 rounded border border-dashed border-slate-700/80 hover:border-cyan-500/60 transition-colors cursor-pointer"
+                                                  title="Add note for this project"
+                                                >
+                                                  <FileText className="w-2.5 h-2.5" />
+                                                  <span>+ Add Note</span>
+                                                </button>
+                                              )}
+
+                                              {locLabel && (
+                                                <span
+                                                  className="truncate max-w-[80px] bg-slate-900/90 text-[8px] text-slate-300 px-1 py-0.2 rounded border border-white/10 shrink-0 font-mono"
+                                                  title={`Designated Location: ${proj.locationId || locLabel}`}
+                                                >
+                                                  {locLabel}
+                                                </span>
+                                              )}
+                                            </div>
                                           </>
                                         );
                                       })()}
@@ -1471,6 +1542,114 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
               >
                 Yes, Remove Technician
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Quick Notes Modal */}
+      {notesModalProject && (
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+          onClick={() => setNotesModalProject(null)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
+                    <span>Notes: {notesModalProject.id}</span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {notesModalProject.cityState} • Tech: {notesModalProject.technician}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setNotesModalProject(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span>Project & Field Notes</span>
+                  <span className="text-[10px] text-slate-500 font-normal">Press Ctrl+Enter to save</span>
+                </label>
+                <textarea
+                  autoFocus
+                  rows={4}
+                  value={editingNoteText}
+                  onChange={(e) => setEditingNoteText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveNote();
+                    }
+                  }}
+                  placeholder="Add notes for this project (e.g. Collecting 9/3; Teardown 24 hrs; Gate code #1234; Client contact...)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-white focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent font-sans resize-none"
+                />
+              </div>
+
+              {/* Quick Suggestion Chips */}
+              <div className="flex flex-wrap gap-1.5">
+                <span className="text-[10px] text-slate-400 flex items-center">Quick Add:</span>
+                {['Collecting this week', 'Teardown 24 hrs', 'Gate code needed', 'Contact client on arrival', 'Recollection'].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => {
+                      setEditingNoteText((prev) => (prev ? `${prev}; ${chip}` : chip));
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 transition-colors cursor-pointer"
+                  >
+                    +{chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-3.5 border-t border-slate-800 bg-slate-950/40">
+              <div>
+                {notesModalProject.schedulerNotes && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingNoteText('')}
+                    className="text-xs text-rose-400 hover:text-rose-300 hover:underline px-1 py-0.5"
+                  >
+                    Clear Note
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNotesModalProject(null)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveNote}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save Note</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
