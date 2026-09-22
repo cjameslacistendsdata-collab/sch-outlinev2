@@ -58,9 +58,11 @@ export function getProjectEquipmentType(project: {
 export interface DayEquipmentDelta {
   installedCameras: number;
   installedMachines: number;
+  swappedCameras: number;
+  swappedMachines: number;
   teardownCameras: number;
   teardownMachines: number;
-  // Net changes on this day (Install removes, Teardown adds back)
+  // Net changes on this day (Install and Swap remove, Teardown adds back)
   netCameras: number;
   netMachines: number;
   // Day-end running balances
@@ -71,6 +73,7 @@ export interface DayEquipmentDelta {
 /**
  * Calculates technician inventory timeline across the week (Sunday through Saturday).
  * - When a project is installed: equipment is subtracted from technician inventory (GREEN).
+ * - When a job is a swap: equipment is subtracted from technician inventory (SKY BLUE).
  * - When a project is torn down: equipment is added back to technician inventory (VIOLET).
  * - Accurately uses the designated units for this specific technician from CSV.
  */
@@ -101,6 +104,8 @@ export function calculateTechInventoryTimeline(
       result[day] = {
         installedCameras: 0,
         installedMachines: 0,
+        swappedCameras: 0,
+        swappedMachines: 0,
         teardownCameras: 0,
         teardownMachines: 0,
         netCameras: 0,
@@ -115,20 +120,28 @@ export function calculateTechInventoryTimeline(
   for (const day of WEEK_DAY_ORDER) {
     let installedCameras = 0;
     let installedMachines = 0;
+    let swappedCameras = 0;
+    let swappedMachines = 0;
     let teardownCameras = 0;
     let teardownMachines = 0;
 
-    // Projects installed or torn down on this day (only valid active projects for this tech)
+    // Projects installed, swapped, or torn down on this day (only valid active projects for this tech)
     for (const p of techProjects) {
       const equipCount = getTechUnitsForProject(p, tech.name);
       const type = getProjectEquipmentType(p);
 
       const isInstallToday = p.installDay === day && (!activeWeekId || shouldShowProjectEventOnDay(p, 'install', day, activeWeekId));
+      const isSwapToday = shouldShowProjectEventOnDay(p, 'battery_swap', day, activeWeekId);
       const isTeardownToday = p.teardownDay === day && (!activeWeekId || shouldShowProjectEventOnDay(p, 'teardown', day, activeWeekId));
 
       if (isInstallToday) {
         if (type === 'Camera') installedCameras += equipCount;
         else installedMachines += equipCount;
+      }
+
+      if (isSwapToday) {
+        if (type === 'Camera') swappedCameras += equipCount;
+        else swappedMachines += equipCount;
       }
 
       if (isTeardownToday) {
@@ -137,9 +150,9 @@ export function calculateTechInventoryTimeline(
       }
     }
 
-    // Installs REMOVE equipment (subtract), Teardowns ADD equipment back (add real-time)
-    const netCameras = teardownCameras - installedCameras;
-    const netMachines = teardownMachines - installedMachines;
+    // Installs REMOVE equipment (subtract), Swaps REMOVE equipment (subtract), Teardowns ADD equipment back (add real-time)
+    const netCameras = teardownCameras - installedCameras - swappedCameras;
+    const netMachines = teardownMachines - installedMachines - swappedMachines;
 
     currentCameras += netCameras;
     currentMachines += netMachines;
@@ -147,6 +160,8 @@ export function calculateTechInventoryTimeline(
     result[day] = {
       installedCameras,
       installedMachines,
+      swappedCameras,
+      swappedMachines,
       teardownCameras,
       teardownMachines,
       netCameras,
@@ -161,8 +176,8 @@ export function calculateTechInventoryTimeline(
 
 /**
  * Returns overall active field load and current remaining stock for a technician.
- * Calculates available cameras in real-time by adding upon teardown and subtracting upon install
- * up to the specific operational reference day.
+ * Calculates available cameras and machines in real-time by subtracting installs and swaps
+ * and adding upon teardown across the active schedule.
  */
 export function getTechOverallEquipmentStats(
   tech: Technician,
@@ -175,15 +190,33 @@ export function getTechOverallEquipmentStats(
   const targetDay = refDayName || 'Monday';
   const dayDelta = timeline[targetDay] || timeline['Monday'];
 
-  const activeCamerasInField = Math.max(0, tech.cameras - dayDelta.availableCameras);
-  const activeMachinesInField = Math.max(0, tech.machines - dayDelta.availableMachines);
+  // Calculate lowest available stock across the full week to ensure any swap or install job reduces available capacity
+  let minAvailCameras = tech.cameras;
+  let minAvailMachines = tech.machines;
+  for (const d of WEEK_DAY_ORDER) {
+    if (timeline[d]) {
+      if (timeline[d].availableCameras < minAvailCameras) minAvailCameras = timeline[d].availableCameras;
+      if (timeline[d].availableMachines < minAvailMachines) minAvailMachines = timeline[d].availableMachines;
+    }
+  }
+
+  // Ensure swaps and installs are deducted from the available total
+  const availCameras = refDayName ? Math.min(dayDelta.availableCameras, minAvailCameras) : minAvailCameras;
+  const availMachines = refDayName ? Math.min(dayDelta.availableMachines, minAvailMachines) : minAvailMachines;
+
+  const activeCamerasInField = Math.max(0, tech.cameras - availCameras);
+  const activeMachinesInField = Math.max(0, tech.machines - availMachines);
 
   return {
     baseCameras: tech.cameras,
     baseMachines: tech.machines,
-    currentAvailableCameras: dayDelta.availableCameras,
-    currentAvailableMachines: dayDelta.availableMachines,
+    currentAvailableCameras: availCameras,
+    currentAvailableMachines: availMachines,
     activeCamerasInField,
     activeMachinesInField,
+    minAvailableCameras: minAvailCameras,
+    minAvailableMachines: minAvailMachines,
+    dayAvailableCameras: dayDelta.availableCameras,
+    dayAvailableMachines: dayDelta.availableMachines,
   };
 }
