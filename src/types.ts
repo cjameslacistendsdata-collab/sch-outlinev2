@@ -77,6 +77,9 @@ export interface Project {
   collectionDay?: string; // e.g. "9/1", "9/2-9/3", "9/3"
   installDay: WeekDay | '';
   teardownDay: WeekDay | '';
+  teardownDate?: string; // Designated teardown calendar date e.g. "9/21" or "2026-09-21" derived from "TEARDOWN  AFTER"
+  teardownAfter?: string; // Raw or parsed string from "TEARDOWN  AFTER" column in imported CSV
+  teardownWorkWeek?: string; // Designated work week ID for teardown e.g. "2026-W39"
   batterySwapDay?: WeekDay | '';
   batterySwapDays?: WeekDay[]; // All scheduled battery swap days
   batterySwapDates?: string[]; // All scheduled battery swap calendar dates e.g. ['9/16', '9/18', '9/20']
