@@ -259,11 +259,11 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
       }
 
       if (eventType === 'install') {
-        return p.installDay === dayName && shouldShowProjectEventOnDay(p, 'install', dayName, activeWeekId);
+        return shouldShowProjectEventOnDay(p, 'install', dayName, activeWeekId);
       } else if (eventType === 'battery_swap') {
         return shouldShowProjectEventOnDay(p, 'battery_swap', dayName, activeWeekId);
       } else {
-        return p.teardownDay === dayName && shouldShowProjectEventOnDay(p, 'teardown', dayName, activeWeekId);
+        return shouldShowProjectEventOnDay(p, 'teardown', dayName, activeWeekId);
       }
     });
   };
@@ -461,8 +461,8 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
               <span className="w-2 h-2 rounded-full bg-sky-400"></span> Swap
             </span>
             <span className="text-slate-300 dark:text-slate-600">•</span>
-            <span className="flex items-center gap-1 text-violet-600 dark:text-violet-300 font-bold">
-              <span className="w-2 h-2 rounded-full bg-violet-400"></span> Teardown
+            <span className="flex items-center gap-1 text-violet-900 dark:text-violet-300 font-bold">
+              <span className="w-2 h-2 rounded-full bg-violet-600 dark:bg-violet-400"></span> Teardown
             </span>
             {allowCOD && (
               <>
@@ -1074,7 +1074,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                       <div
                                         key={`td-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-violet-500/80 bg-violet-50 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-100 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className="p-1.5 rounded text-[11px] border border-violet-400 dark:border-violet-500/80 bg-violet-100/70 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-200/80 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
                                         {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
@@ -1092,12 +1092,12 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                             {isTeardownRollover(p) ? (
                                               <span
                                                 title={`Rollover Teardown from previous week install on ${p.installDay}`}
-                                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-700 text-white tracking-wider border border-violet-400/60 shadow-xs"
+                                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-800 text-white tracking-wider border border-violet-400/60 shadow-xs"
                                               >
                                                 ROLLOVER TD 🔄
                                               </span>
                                             ) : (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-600 text-white tracking-wider font-bold shadow-xs">
+                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-700 dark:bg-violet-600 text-white tracking-wider font-bold shadow-xs">
                                                 TEARDOWN
                                               </span>
                                             )}
@@ -1105,8 +1105,8 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         </div>
 
                                         {/* Row 2: Project Number with Full Space */}
-                                        <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
-                                          <ArrowUpCircle className="w-2.5 h-2.5 text-violet-600 dark:text-violet-400 shrink-0" />
+                                        <div className="flex items-center gap-1 font-mono font-black text-slate-950 dark:text-white min-w-0">
+                                          <ArrowUpCircle className="w-2.5 h-2.5 text-violet-800 dark:text-violet-400 shrink-0" />
                                           <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
                                             {p.id}
                                           </span>
@@ -1149,7 +1149,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                             </button>
                                           )}
 
-                                          <span className="font-mono text-[10px] text-violet-700 dark:text-violet-300 font-bold shrink-0 ml-auto">
+                                          <span className="font-mono text-[10px] text-violet-950 dark:text-violet-300 font-extrabold shrink-0 ml-auto">
                                             {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
                                           </span>
                                         </div>
