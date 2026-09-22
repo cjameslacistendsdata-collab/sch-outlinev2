@@ -404,17 +404,91 @@ export function getPreviousWorkWeekId(weekId: string): string {
 }
 
 /**
+ * Resolves the WorkWeekSheet ID (e.g. "2026-W38" or "2026-W39") for any calendar date or date string (e.g. "9/21", "2026-09-21").
+ */
+export function getWorkWeekIdFromCalendarDate(
+  dateOrStr: Date | string,
+  existingSheets: WorkWeekSheet[] = INITIAL_WORK_WEEKS
+): string {
+  let date: Date;
+  if (typeof dateOrStr === 'string') {
+    const slashMatch = dateOrStr.match(/([0-1]?[0-9])\/([0-3]?[0-9])(?:\/([0-9]{2,4}))?/);
+    if (slashMatch) {
+      const m = parseInt(slashMatch[1], 10);
+      const d = parseInt(slashMatch[2], 10);
+      let y = slashMatch[3] ? parseInt(slashMatch[3], 10) : 2026;
+      if (y < 100) y += 2000;
+      date = new Date(y, m - 1, d);
+    } else {
+      const isoMatch = dateOrStr.match(/([0-9]{4})-([0-1]?[0-9])-([0-3]?[0-9])/);
+      if (isoMatch) {
+        date = new Date(parseInt(isoMatch[1], 10), parseInt(isoMatch[2], 10) - 1, parseInt(isoMatch[3], 10));
+      } else {
+        date = new Date(dateOrStr);
+      }
+    }
+  } else {
+    date = dateOrStr;
+  }
+
+  if (!date || isNaN(date.getTime())) {
+    return CURRENT_WORK_WEEK_ID;
+  }
+
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const targetDateStr = `${y}-${m}-${d}`;
+
+  for (const sheet of existingSheets) {
+    if (targetDateStr >= sheet.startDate && targetDateStr <= sheet.endDate) {
+      return sheet.id;
+    }
+  }
+
+  // Calculate Sunday of this date
+  const dayOfWeek = date.getDay(); // 0 = Sunday
+  const sunday = new Date(date);
+  sunday.setDate(date.getDate() - dayOfWeek);
+
+  const oneJan = new Date(date.getFullYear(), 0, 1);
+  const diffDays = Math.floor((sunday.getTime() - oneJan.getTime()) / (24 * 60 * 60 * 1000));
+  const weekNum = Math.max(1, Math.ceil((diffDays + oneJan.getDay() + 1) / 7));
+
+  return `${date.getFullYear()}-W${String(weekNum).padStart(2, '0')}`;
+}
+
+/**
  * Determines whether a project's teardown extends into the following work week.
  * Example: Installed on Thursday (Day 4) and Teardown falls on Sunday (Day 0) -> Rollover into upcoming week.
+ * Or: Explicit teardownDate / teardownWorkWeek falls into succeeding work week.
  */
 export function isTeardownRollover(project: {
   installDay?: WeekDay | '';
   teardownDay?: WeekDay | '';
+  teardownDate?: string;
+  teardownAfter?: string;
+  teardownWorkWeek?: string;
+  workWeek?: string;
   collectionWindow?: string;
   collectionDay?: string;
   consecutiveCollectionDays?: number;
   studyType?: string;
 }): boolean {
+  // 1. If explicit teardownWorkWeek is provided and differs from base workWeek
+  if (project.teardownWorkWeek && project.workWeek && project.teardownWorkWeek !== project.workWeek) {
+    return true;
+  }
+
+  // 2. If explicit teardownDate is provided, check if it falls in a different week from base week
+  if (project.teardownDate) {
+    const tdWeek = getWorkWeekIdFromCalendarDate(project.teardownDate);
+    const baseWeek = project.workWeek || determineWorkWeekFromInstallDate(project.collectionDay, project.collectionWindow, undefined, project.installDay);
+    if (tdWeek && baseWeek && tdWeek !== baseWeek) {
+      return true;
+    }
+  }
+
   if (!project.installDay || !project.teardownDay) {
     return false;
   }
@@ -422,23 +496,23 @@ export function isTeardownRollover(project: {
   const installIdx = DAY_ORDER_MAP[project.installDay];
   const teardownIdx = DAY_ORDER_MAP[project.teardownDay];
 
-  // If teardown day of week is on or before install day of week, it physically
-  // must happen in the subsequent week (e.g. Thu -> Sun, Fri -> Mon, Sat -> Tue, Mon -> Mon)
-  if (teardownIdx <= installIdx) {
-    return true;
-  }
-
-  // If collection duration is 6+ days (e.g. 7-day collection starting Mon (1), teardown Tue (2) next week)
+  // If collection duration is 6+ days (e.g. 7-day collection starting Sun (0), teardown Mon (1) next week)
   if (project.consecutiveCollectionDays && project.consecutiveCollectionDays >= 6) {
     return true;
   }
 
-  // If study type is 7-day or notes suggest 7-day
-  if (project.studyType && (project.studyType.includes('7-Day') || project.studyType.includes('7 Day') || project.studyType.includes('ATR'))) {
+  // If teardown day of week is on or before install day of week, it physically
+  // must happen in the subsequent week (e.g. Thu -> Sun, Fri -> Mon, Sat -> Tue, Mon -> Mon, Sun -> Sun)
+  if (teardownIdx <= installIdx) {
     return true;
   }
 
-  // Also check explicit dates in collectionWindow if available (e.g. "9/10 - 9/13" or "9/14 - 9/22")
+  // If study type is 7-day or notes suggest 7-day
+  if (project.studyType && (project.studyType.includes('7-Day') || project.studyType.includes('7 Day') || project.studyType.includes('7day') || project.studyType.includes('ATR'))) {
+    return true;
+  }
+
+  // Also check explicit dates in collectionWindow if available (e.g. "9/10 - 9/13" or "9/14 - 9/22" or "9/14-9/20")
   if (project.collectionWindow) {
     const slashMatches = project.collectionWindow.match(/([0-1]?[0-9])\/([0-3]?[0-9])/g);
     if (slashMatches && slashMatches.length >= 2) {
@@ -447,7 +521,7 @@ export function isTeardownRollover(project: {
       const date1 = new Date(2026, m1 - 1, d1);
       const date2 = new Date(2026, m2 - 1, d2);
       const diffDays = Math.round((date2.getTime() - date1.getTime()) / (24 * 60 * 60 * 1000));
-      if (diffDays >= 7 || (diffDays >= 2 && date1.getDay() > date2.getDay())) {
+      if (diffDays >= 6 || (diffDays >= 2 && date1.getDay() > date2.getDay())) {
         return true;
       }
     }
@@ -477,12 +551,19 @@ export function getProjectBaseWorkWeek(
 
 /**
  * Returns the work week ID in which a project's teardown occurs.
- * If the teardown rolls over (e.g. Thu install -> Sun teardown), this returns the next work week ID!
+ * If teardownWorkWeek or teardownDate is set, uses the exact designated work week!
+ * Otherwise, if the teardown rolls over (e.g. Thu install -> Sun teardown), returns the next work week ID.
  */
 export function getProjectTeardownWorkWeek(
   project: Project,
   existingSheets: WorkWeekSheet[] = INITIAL_WORK_WEEKS
 ): string {
+  if (project.teardownWorkWeek) {
+    return project.teardownWorkWeek;
+  }
+  if (project.teardownDate) {
+    return getWorkWeekIdFromCalendarDate(project.teardownDate, existingSheets);
+  }
   const baseWeek = getProjectBaseWorkWeek(project, existingSheets);
   if (isTeardownRollover(project)) {
     return getNextWorkWeekId(baseWeek);
@@ -494,8 +575,8 @@ export function getProjectTeardownWorkWeek(
  * Filter projects by selected work week sheet.
  * Includes:
  * 1. Projects whose primary installation occurs in this work week.
- * 2. Rollover Projects: Projects whose installation occurred in the previous week
- *    and whose teardown extends into this upcoming Work Week view!
+ * 2. Carry-Over / Rollover Projects: Projects whose teardown falls into this work week sheet!
+ * 3. Projects with battery swaps falling into this work week sheet.
  */
 export function filterProjectsByWorkWeek(
   projects: Project[],
@@ -510,19 +591,25 @@ export function filterProjectsByWorkWeek(
 
   return projects.filter((p) => {
     const baseWeek = getProjectBaseWorkWeek(p, existingSheets);
+    const teardownWeek = getProjectTeardownWorkWeek(p, existingSheets);
 
-    // 1. Direct match for this work week
+    // 1. Direct match for this installation work week
     if (baseWeek === selectedWeekId) {
       return true;
     }
 
-    // 2. Rollover carryover: Project was installed in previous work week,
-    // but its teardown extends into this upcoming week!
+    // 2. Carry-over project: teardown is designated in this succeeding work week!
+    if (teardownWeek === selectedWeekId) {
+      return true;
+    }
+
+    // 3. Rollover carryover: Project was installed in previous work week,
+    // and its teardown extends into this upcoming week
     if (baseWeek === prevWeekId && isTeardownRollover(p)) {
       return true;
     }
 
-    // 3. Project has any battery swap occurring in this selectedWeekId
+    // 4. Project has any battery swap occurring in this selectedWeekId
     const targetSheet = existingSheets.find((s) => s.id === selectedWeekId);
     if (targetSheet) {
       const hasBatterySwapInWeek = targetSheet.dateColumns.some((col) =>
@@ -550,9 +637,10 @@ export function filterProjectsByWorkWeek(
  *     - If collecting 3+ consecutive days, battery swaps occur 2 days after installation
  *       and every other day until teardown (e.g. 3-day: install + 2 days; 7-day: install + 2, 4, 6 days).
  *     - Correctly renders across both within-week and rollover work weeks!
- * - For teardown with rollover:
- *     - Does NOT render on the previous Sunday/Monday of the install week! (Prevents 9/13 showing on 9/6).
- *     - Renders on the teardown day in the upcoming rollover week.
+ * - For teardown:
+ *     - Plotted on its exact designated date from "TEARDOWN  AFTER" in the matching work week!
+ *     - Does NOT render on the previous Sunday/Monday of the install week! (Prevents 9/13 showing on 9/6 or 9/21 on 9/14).
+ *     - Renders on the designated teardown day/date in the succeeding rollover week.
  */
 export function shouldShowProjectEventOnDay(
   project: Project,
@@ -562,7 +650,6 @@ export function shouldShowProjectEventOnDay(
   existingSheets: WorkWeekSheet[] = INITIAL_WORK_WEEKS
 ): boolean {
   const baseWeek = getProjectBaseWorkWeek(project, existingSheets);
-  const hasRollover = isTeardownRollover(project);
   const rolloverWeek = getNextWorkWeekId(baseWeek);
 
   if (eventType === 'install') {
@@ -604,19 +691,28 @@ export function shouldShowProjectEventOnDay(
   }
 
   if (eventType === 'teardown') {
-    if (project.teardownDay !== dayName) {
+    const teardownWeek = getProjectTeardownWorkWeek(project, existingSheets);
+
+    // Only render teardown in the work week where the teardown occurs!
+    if (selectedWeekId !== teardownWeek) {
       return false;
     }
 
-    if (hasRollover) {
-      // If project has teardown rollover into next week:
-      // - In the install week: DO NOT place teardown on this day (e.g. DO NOT show on Sunday 9/6 when installed on 9/10)!
-      // - In the upcoming rollover week: DO show on this day (e.g. Sunday 9/13)!
-      return selectedWeekId === rolloverWeek;
-    } else {
-      // Normal within-week teardown
-      return selectedWeekId === baseWeek;
+    // If project has an explicit teardownDate (e.g. "9/21" or "2026-09-21" from "TEARDOWN  AFTER")
+    if (project.teardownDate) {
+      const targetSheet = existingSheets.find((s) => s.id === selectedWeekId);
+      if (targetSheet) {
+        const col = targetSheet.dateColumns.find((c) => c.dayName === dayName);
+        if (col) {
+          const cleanTdDate = project.teardownDate.replace(/^0+/, '').replace(/\/0+/, '/');
+          const cleanColDate = col.dateStr.replace(/^0+/, '').replace(/\/0+/, '/');
+          return cleanTdDate === cleanColDate || project.teardownDate === col.fullDate;
+        }
+      }
     }
+
+    // Match against teardownDay weekday
+    return project.teardownDay === dayName;
   }
 
   return false;
