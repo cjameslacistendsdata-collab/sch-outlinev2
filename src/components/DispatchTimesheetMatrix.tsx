@@ -1076,7 +1076,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         onClick={() => onSelectProject(p)}
                                         className="p-1.5 rounded text-[11px] border border-violet-400 dark:border-violet-500/80 bg-violet-100/70 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-200/80 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
                                       >
-                                        {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) */}
+                                        {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) + Equipment Count Top Right */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
                                           <div className="flex items-center gap-1 shrink-0 flex-wrap">
                                             {allowCOD && pGroup === 'COD' && (
@@ -1092,16 +1092,21 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                             {isTeardownRollover(p) ? (
                                               <span
                                                 title={`Rollover Teardown from previous week install on ${p.installDay}`}
-                                                className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-800 text-white tracking-wider border border-violet-400/60 shadow-xs"
+                                                className="teardown-badge px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-950 text-white tracking-wider border border-white/40 shadow-xs"
                                               >
                                                 ROLLOVER TD 🔄
                                               </span>
                                             ) : (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-700 dark:bg-violet-600 text-white tracking-wider font-bold shadow-xs">
+                                              <span className="teardown-badge px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-950/90 text-white tracking-wider font-black shadow-xs border border-white/40">
                                                 TEARDOWN
                                               </span>
                                             )}
                                           </div>
+
+                                          {/* Equipment count on top right */}
+                                          <span className="teardown-equip-delta font-mono text-[10px] text-white font-black shrink-0 ml-auto tracking-wide">
+                                            {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
+                                          </span>
                                         </div>
 
                                         {/* Row 2: Project Number with Full Space */}
@@ -1124,14 +1129,14 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                           </div>
                                         )}
 
-                                        {/* Row 4: Replace location with option to add notes (Left) + Equipment count (Right) */}
+                                        {/* Row 4: Replace location with option to add notes */}
                                         <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
                                           {p.schedulerNotes ? (
                                             <button
                                               type="button"
                                               onClick={(e) => handleOpenNotes(e, p)}
                                               title={`Note: ${p.schedulerNotes} (Click to edit)`}
-                                              className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
+                                              className="flex-1 min-w-0 flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
                                             >
                                               <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
                                               <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
@@ -1142,16 +1147,12 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                               type="button"
                                               onClick={(e) => handleOpenNotes(e, p)}
                                               title="Add note for this project"
-                                              className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
+                                              className="flex items-center gap-1 text-[8.5px] text-violet-200 hover:text-white dark:text-slate-400 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-violet-300/50 dark:border-slate-700 hover:border-white transition-colors cursor-pointer"
                                             >
                                               <FileText className="w-2.5 h-2.5 shrink-0" />
                                               <span>+ Add Note</span>
                                             </button>
                                           )}
-
-                                          <span className="font-mono text-[10px] text-violet-950 dark:text-violet-300 font-extrabold shrink-0 ml-auto">
-                                            {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
-                                          </span>
                                         </div>
                                       </div>
                                     );
