@@ -827,6 +827,7 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
 
                           // Equipment movement flags for this day
                           const hasInstallsToday = dayDelta.installedCameras > 0 || dayDelta.installedMachines > 0;
+                          const hasSwapsToday = (dayDelta.swappedCameras || 0) > 0 || (dayDelta.swappedMachines || 0) > 0;
                           const hasTeardownsToday = dayDelta.teardownCameras > 0 || dayDelta.teardownMachines > 0;
 
                           const allEventsInCell = cellEvents;
@@ -891,8 +892,8 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                 )}
                               </div>
 
-                              {/* Daily Equipment Delta Banner (Install removes, Teardown adds back) */}
-                              {(hasInstallsToday || hasTeardownsToday) && (
+                              {/* Daily Equipment Delta Banner (Install and Swap remove, Teardown adds back) */}
+                              {(hasInstallsToday || hasSwapsToday || hasTeardownsToday) && (
                                 <div className="mb-1.5 flex flex-col gap-1 pb-1 border-b border-slate-800">
                                   {/* INSTALL: Removed from inventory (GREEN) */}
                                   {hasInstallsToday && (
@@ -908,6 +909,24 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                         -{dayDelta.installedCameras > 0 ? `${dayDelta.installedCameras} Cam` : ''}
                                         {dayDelta.installedCameras > 0 && dayDelta.installedMachines > 0 ? ', ' : ''}
                                         {dayDelta.installedMachines > 0 ? `${dayDelta.installedMachines} Mach` : ''}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {/* SWAP: Removed from inventory (SKY BLUE) */}
+                                  {hasSwapsToday && (
+                                    <div
+                                      title="Swap Day: Equipment removed/swapped from technician stock"
+                                      className="px-1.5 py-0.5 rounded text-[9px] font-mono font-black bg-sky-950/90 text-sky-300 border border-sky-500/80 flex items-center justify-between shadow-sm"
+                                    >
+                                      <span className="flex items-center gap-0.5">
+                                        <RefreshCw className="w-2.5 h-2.5 text-sky-400" />
+                                        <span>SWAP</span>
+                                      </span>
+                                      <span>
+                                        -{dayDelta.swappedCameras > 0 ? `${dayDelta.swappedCameras} Cam` : ''}
+                                        {dayDelta.swappedCameras > 0 && dayDelta.swappedMachines > 0 ? ', ' : ''}
+                                        {dayDelta.swappedMachines > 0 ? `${dayDelta.swappedMachines} Mach` : ''}
                                       </span>
                                     </div>
                                   )}
@@ -1060,8 +1079,8 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                                 )}
                                                 {isBatterySwap && (
                                                   <span className="text-sky-300 flex items-center gap-0.5">
-                                                    <span>⇄ {techUnits}</span>
-                                                    <span>Swap</span>
+                                                    <span>-{techUnits}</span>
+                                                    <span>{equipType === 'Camera' ? 'Cam' : 'Mach'}</span>
                                                   </span>
                                                 )}
                                                 {isTeardown && (
