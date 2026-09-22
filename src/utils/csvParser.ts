@@ -1,5 +1,5 @@
 import { Project, OpsStatus, ScheduleStatus, StudyType, WeekDay, EquipmentType } from '../types';
-import { determineWorkWeekFromInstallDate, normalizeWorkWeekString } from './workWeekEngine';
+import { determineWorkWeekFromInstallDate, normalizeWorkWeekString, getWorkWeekIdFromCalendarDate } from './workWeekEngine';
 import { formatDateTimeSent } from './dateTimeFormat';
 import { calculateBatterySwaps } from './batterySwapEngine';
 import { TECHNICIANS } from '../data/technicians';
@@ -289,6 +289,257 @@ const DAY_ORDER: WeekDay[] = [
   'Friday',
   'Saturday',
 ];
+
+export interface ParseTeardownAfterParams {
+  rawTeardownAfter: string;
+  rawTeardownDay: string;
+  installDay: WeekDay | '';
+  rawInstall: string;
+  collectionWindow: string;
+  collectionDay: string;
+  parsedDaysCount: number;
+  studyType: string;
+  schedulerNotes: string;
+  analystNotes: string;
+  detectedWorkWeek?: string | null;
+}
+
+export interface ParseTeardownAfterResult {
+  teardownDay: WeekDay | '';
+  teardownDate?: string;
+  teardownAfter?: string;
+  teardownWorkWeek?: string;
+}
+
+/**
+ * Parses teardown information prioritizing the "TEARDOWN  AFTER" data from imported CSV.
+ * Directly addresses:
+ * "THERE IS A PROBLEM WITH THE CARRY OVER PROJECT FROM PREVIOUS WEEK TO SUCCEEDING WORK WEEK NOT BEING PLOTTED TO ITS CORRECT AND DESIGNATED DATE. KINDLY BASE THE TEARDOWN DATE FROM THE 'TEARDOWN  AFTER' FROM THE IMPORTED CSV TO MATCH."
+ */
+export function parseTeardownAfter(params: ParseTeardownAfterParams): ParseTeardownAfterResult {
+  const {
+    rawTeardownAfter,
+    rawTeardownDay,
+    installDay,
+    rawInstall,
+    collectionWindow,
+    collectionDay,
+    parsedDaysCount,
+    studyType,
+    schedulerNotes,
+    analystNotes,
+  } = params;
+
+  // Helper to extract a date from a text string
+  const extractDateFromText = (text: string): { month: number; day: number; year: number } | null => {
+    if (!text) return null;
+    const slashMatch = text.match(/([0-1]?[0-9])\/([0-3]?[0-9])(?:\/([0-9]{2,4}))?/);
+    if (slashMatch) {
+      const month = parseInt(slashMatch[1], 10);
+      const day = parseInt(slashMatch[2], 10);
+      let year = slashMatch[3] ? parseInt(slashMatch[3], 10) : 2026;
+      if (year < 100) year += 2000;
+      return { month, day, year };
+    }
+    const isoMatch = text.match(/([0-9]{4})-([0-1]?[0-9])-([0-3]?[0-9])/);
+    if (isoMatch) {
+      return {
+        year: parseInt(isoMatch[1], 10),
+        month: parseInt(isoMatch[2], 10),
+        day: parseInt(isoMatch[3], 10),
+      };
+    }
+    return null;
+  };
+
+  // Helper to extract the primary collection date
+  const getCollectionBaseDate = (): Date | null => {
+    // 1. From collectionWindow: e.g. "9/15 - 9/21" -> collection ends 9/21
+    if (collectionWindow) {
+      const allDates = collectionWindow.match(/([0-1]?[0-9])\/([0-3]?[0-9])/g);
+      if (allDates && allDates.length > 0) {
+        const lastDate = allDates[allDates.length - 1];
+        const [m, d] = lastDate.split('/').map(Number);
+        return new Date(2026, m - 1, d);
+      }
+    }
+    // 2. From collectionDay: e.g. "9/15" or "9/15-9/21"
+    if (collectionDay) {
+      const allDates = collectionDay.match(/([0-1]?[0-9])\/([0-3]?[0-9])/g);
+      if (allDates && allDates.length > 0) {
+        const lastDate = allDates[allDates.length - 1];
+        const [m, d] = lastDate.split('/').map(Number);
+        return new Date(2026, m - 1, d);
+      }
+    }
+    // 3. From rawInstall: e.g. "9/14"
+    if (rawInstall) {
+      const dt = extractDateFromText(rawInstall);
+      if (dt) {
+        const d = new Date(dt.year, dt.month - 1, dt.day);
+        if (parsedDaysCount > 0) {
+          d.setDate(d.getDate() + parsedDaysCount);
+        }
+        return d;
+      }
+    }
+    return null;
+  };
+
+  // 1. PRIORITY: Check explicit "TEARDOWN  AFTER" column from CSV
+  if (rawTeardownAfter && rawTeardownAfter.trim()) {
+    const rawVal = rawTeardownAfter.trim();
+    // 1A. Does it contain an explicit date? e.g. "9/21", "09/21", "9/21/2026", "2026-09-21"
+    const explicitDate = extractDateFromText(rawVal);
+    if (explicitDate) {
+      const tdDate = new Date(explicitDate.year, explicitDate.month - 1, explicitDate.day);
+      if (!isNaN(tdDate.getTime())) {
+        const teardownDay = DAY_ORDER[tdDate.getDay()];
+        const teardownDate = `${explicitDate.month}/${explicitDate.day}`;
+        const teardownWorkWeek = getWorkWeekIdFromCalendarDate(tdDate);
+        return {
+          teardownDay,
+          teardownDate,
+          teardownAfter: rawVal,
+          teardownWorkWeek,
+        };
+      }
+    }
+
+    // 1B. Does it specify duration offset? e.g. "after 24 hrs", "after 48 hrs", "after 24 hours", "24 hrs", "after 3 days"
+    const hrMatch = rawVal.match(/(\d+)\s*(?:hr|hour)/i);
+    const dayMatch = rawVal.match(/(\d+)\s*(?:day|d\b)/i);
+    if (hrMatch || dayMatch) {
+      const hours = hrMatch ? parseInt(hrMatch[1], 10) : parseInt(dayMatch![1], 10) * 24;
+      const daysOffset = Math.max(1, Math.round(hours / 24));
+      const baseDate = getCollectionBaseDate();
+      if (baseDate) {
+        const tdDate = new Date(baseDate);
+        tdDate.setDate(baseDate.getDate() + daysOffset);
+        const teardownDay = DAY_ORDER[tdDate.getDay()];
+        const teardownDate = `${tdDate.getMonth() + 1}/${tdDate.getDate()}`;
+        const teardownWorkWeek = getWorkWeekIdFromCalendarDate(tdDate);
+        return {
+          teardownDay,
+          teardownDate,
+          teardownAfter: rawVal,
+          teardownWorkWeek,
+        };
+      }
+    }
+
+    // 1C. Is it a weekday name? e.g. "Monday", "Tuesday"
+    const tdDay = normalizeDay(rawVal);
+    if (tdDay) {
+      return {
+        teardownDay: tdDay,
+        teardownAfter: rawVal,
+      };
+    }
+  }
+
+  // 2. SECONDARY: Check notes for explicit Teardown instructions (e.g. "Teardown 09/21", "TD 8/28", "Teardown after 24 hrs")
+  const combinedNotes = `${analystNotes} ${schedulerNotes} ${collectionWindow}`;
+  const tdNoteDateMatch = combinedNotes.match(/(?:teardown|td)\s*(?:at|on|after|date)?\s*(?:at\s+[0-9]{1,2}:[0-9]{2}\s*)?(?:on\s+)?([0-1]?[0-9]\/[0-3]?[0-9](?:\/[0-9]{2,4})?)/i);
+  if (tdNoteDateMatch) {
+    const explicitDate = extractDateFromText(tdNoteDateMatch[1]);
+    if (explicitDate) {
+      const tdDate = new Date(explicitDate.year, explicitDate.month - 1, explicitDate.day);
+      if (!isNaN(tdDate.getTime())) {
+        const teardownDay = DAY_ORDER[tdDate.getDay()];
+        const teardownDate = `${explicitDate.month}/${explicitDate.day}`;
+        const teardownWorkWeek = getWorkWeekIdFromCalendarDate(tdDate);
+        return {
+          teardownDay,
+          teardownDate,
+          teardownAfter: `Teardown ${teardownDate}`,
+          teardownWorkWeek,
+        };
+      }
+    }
+  }
+
+  // 2B. Notes specifying "Teardown after 24 hrs" / "Teardown 24 hrs"
+  const tdNoteHrMatch = combinedNotes.match(/(?:teardown|td)\s*(?:after)?\s*(\d+)\s*(?:hr|hour)/i);
+  if (tdNoteHrMatch) {
+    const hours = parseInt(tdNoteHrMatch[1], 10);
+    const daysOffset = Math.max(1, Math.round(hours / 24));
+    const baseDate = getCollectionBaseDate();
+    if (baseDate) {
+      const tdDate = new Date(baseDate);
+      tdDate.setDate(baseDate.getDate() + daysOffset);
+      const teardownDay = DAY_ORDER[tdDate.getDay()];
+      const teardownDate = `${tdDate.getMonth() + 1}/${tdDate.getDate()}`;
+      const teardownWorkWeek = getWorkWeekIdFromCalendarDate(tdDate);
+      return {
+        teardownDay,
+        teardownDate,
+        teardownAfter: `Teardown after ${hours} hrs`,
+        teardownWorkWeek,
+      };
+    }
+  }
+
+  // 3. TERTIARY: Check rawTeardownDay column
+  if (rawTeardownDay && rawTeardownDay.trim()) {
+    const rawVal = rawTeardownDay.trim();
+    const explicitDate = extractDateFromText(rawVal);
+    if (explicitDate) {
+      const tdDate = new Date(explicitDate.year, explicitDate.month - 1, explicitDate.day);
+      if (!isNaN(tdDate.getTime())) {
+        const teardownDay = DAY_ORDER[tdDate.getDay()];
+        const teardownDate = `${explicitDate.month}/${explicitDate.day}`;
+        const teardownWorkWeek = getWorkWeekIdFromCalendarDate(tdDate);
+        return {
+          teardownDay,
+          teardownDate,
+          teardownAfter: rawVal,
+          teardownWorkWeek,
+        };
+      }
+    }
+    const tdDay = normalizeDay(rawVal);
+    if (tdDay) {
+      return {
+        teardownDay: tdDay,
+        teardownAfter: rawVal,
+      };
+    }
+  }
+
+  // 4. FALLBACK: Consecutive days calculation
+  if (installDay) {
+    if (parsedDaysCount >= 2) {
+      const instIdx = DAY_ORDER.indexOf(installDay);
+      const teardownDay = DAY_ORDER[(instIdx + parsedDaysCount + 1) % 7];
+      const baseDate = getCollectionBaseDate();
+      let teardownDate: string | undefined = undefined;
+      let teardownWorkWeek: string | undefined = undefined;
+      if (baseDate) {
+        const tdDate = new Date(baseDate);
+        tdDate.setDate(baseDate.getDate() + 1);
+        teardownDate = `${tdDate.getMonth() + 1}/${tdDate.getDate()}`;
+        teardownWorkWeek = getWorkWeekIdFromCalendarDate(tdDate);
+      }
+      return {
+        teardownDay,
+        teardownDate,
+        teardownAfter: `${parsedDaysCount}-Day Study`,
+        teardownWorkWeek,
+      };
+    } else {
+      const fallbackDays = studyType === 'ATR' || studyType === 'ATR (Camera)' ? 3 : 2;
+      const teardownDay = addDaysToWeekDay(installDay, fallbackDays);
+      return {
+        teardownDay,
+      };
+    }
+  }
+
+  return {
+    teardownDay: '',
+  };
+}
 
 /**
  * Normalizes day of week to valid WeekDay or empty string.
@@ -845,14 +1096,24 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
           'installationday',
           'installedday'
         );
-  const teardownCol = findColumn(
-    'teardownday',
-    'teardown',
-    'teardowndate',
-    'tdday',
+  const teardownAfterCol = findColumn(
     'teardownafter',
-    'teardown_after'
+    'teardown_after',
+    'teardownafterdate',
+    'teardownaftertime',
+    'teardownafterops',
+    'tdafter',
+    'teardowndate',
+    'teardownafterdays',
+    'teardownafterhours'
   );
+  const teardownDayCol = findColumn(
+    'teardownday',
+    'teardown_day',
+    'tdday',
+    'teardown'
+  );
+  const teardownCol = teardownAfterCol !== -1 ? teardownAfterCol : teardownDayCol;
   const techCol = findColumn(
     'technician',
     'tech',
@@ -927,7 +1188,12 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
         : installCol !== -1
         ? rawHeaders[installCol]
         : 'Derived (1 day before Collection Date)',
-    'Teardown Day': teardownCol !== -1 ? rawHeaders[teardownCol] : 'Derived (2-3 days post-install)',
+    'Teardown / Teardown After':
+      teardownAfterCol !== -1
+        ? `${rawHeaders[teardownAfterCol]} (TEARDOWN AFTER)`
+        : teardownDayCol !== -1
+        ? rawHeaders[teardownDayCol]
+        : 'Derived from collection duration & notes',
     'Work Week (WW)': wwCol !== -1 ? rawHeaders[wwCol] : 'Derived from Install/Collection Date',
     'Equipment (Units) / Total Units':
       totalUnitsCol !== -1
@@ -1228,30 +1494,6 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
     const urgency = urgencyCol !== -1 && row[urgencyCol]?.toLowerCase().includes('priority') ? 'Priority Client' : 'Standard';
     const deliverVideo = videoCol !== -1 && row[videoCol]?.toLowerCase().includes('yes');
 
-    // Parse Teardown Day directly from CSV, with notes inspection and duration-based calculation
-    let teardownDay = teardownCol !== -1 ? normalizeDay(row[teardownCol]) : '';
-    if (!teardownDay && installDay) {
-      // Check notes for explicit teardown mention e.g. "Teardown 09/21"
-      const combinedNotes = `${schedulerNotes} ${analystNotes} ${collectionWindow}`.toLowerCase();
-      const tdNoteMatch = combinedNotes.match(/teardown\s*(?:at|on)?\s*([0-1]?[0-9]\/[0-3]?[0-9])/);
-      if (tdNoteMatch) {
-        const parsedNoteDay = normalizeDay(tdNoteMatch[1]);
-        if (parsedNoteDay) {
-          teardownDay = parsedNoteDay;
-        }
-      }
-      if (!teardownDay) {
-        // If consecutive collection days is known (e.g. 7-day study: install Sun -> teardown Mon)
-        if (parsedDaysCount >= 2) {
-          const instIdx = DAY_ORDER.indexOf(installDay);
-          teardownDay = DAY_ORDER[(instIdx + parsedDaysCount + 1) % 7];
-        } else {
-          const fallbackDays = studyType === 'ATR' || studyType === 'ATR (Camera)' ? 3 : 2;
-          teardownDay = addDaysToWeekDay(installDay, fallbackDays);
-        }
-      }
-    }
-
     // WW = WORK WEEK = Active Cycle
     let detectedWorkWeek: string | null = null;
     if (wwCol !== -1 && row[wwCol]) {
@@ -1265,6 +1507,30 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
         installDay
       );
     }
+
+    // User directive: "KINDLY BASE THE TEARDOWN DATE FROM THE 'TEARDOWN  AFTER' FROM THE IMPORTED CSV TO MATCH."
+    const rawTeardownAfter = teardownAfterCol !== -1 && row[teardownAfterCol] ? row[teardownAfterCol].trim() : '';
+    const rawTeardownDay = teardownDayCol !== -1 && row[teardownDayCol] ? row[teardownDayCol].trim() : '';
+
+    const collectionDay = collectionWindow ? extractDayFromText(collectionWindow) : undefined;
+    const parsedTeardown = parseTeardownAfter({
+      rawTeardownAfter,
+      rawTeardownDay,
+      installDay,
+      rawInstall,
+      collectionWindow,
+      collectionDay,
+      parsedDaysCount,
+      studyType,
+      schedulerNotes,
+      analystNotes,
+      detectedWorkWeek,
+    });
+
+    const teardownDay = parsedTeardown.teardownDay;
+    const teardownDate = parsedTeardown.teardownDate;
+    const teardownAfter = parsedTeardown.teardownAfter;
+    const teardownWorkWeek = parsedTeardown.teardownWorkWeek;
 
     // User requirement:
     // "Sync Battery Swap to Battey Change/Equipment Check 1, 2, 3, 4, 5 and so on and ignore previous prompt to plot it every other day after install until teardown"
@@ -1341,6 +1607,9 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
         collectionWindow,
         installDay,
         teardownDay,
+        teardownDate,
+        teardownAfter,
+        teardownWorkWeek,
         batterySwapDay: finalSwapDay,
         batterySwapDays: finalSwapDays,
         batterySwapDates: finalSwapDates,
@@ -1422,6 +1691,20 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
         const swapDatesSet = new Set(existingProj.batterySwapDates || []);
         finalSwapDates.forEach((dt) => swapDatesSet.add(dt));
         existingProj.batterySwapDates = Array.from(swapDatesSet);
+      }
+
+      // 6. Teardown details from "TEARDOWN  AFTER"
+      if (teardownDay && (!existingProj.teardownDay || (existingProj.teardownDay as string) === '')) {
+        existingProj.teardownDay = teardownDay;
+      }
+      if (teardownDate && !existingProj.teardownDate) {
+        existingProj.teardownDate = teardownDate;
+      }
+      if (teardownAfter && !existingProj.teardownAfter) {
+        existingProj.teardownAfter = teardownAfter;
+      }
+      if (teardownWorkWeek && !existingProj.teardownWorkWeek) {
+        existingProj.teardownWorkWeek = teardownWorkWeek;
       }
     }
   }
