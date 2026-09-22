@@ -406,20 +406,20 @@ html.light [class*="bg-violet-950/30"] {
   color: #4c1d95 !important;
 }
 
-html.light [class*="bg-violet-950/50"] .text-white,
-html.light [class*="bg-violet-950/70"] .text-white,
-html.light [class*="bg-violet-950/80"] .text-white,
-html.light [class*="bg-violet-950/90"] .text-white,
-html.light [class*="bg-violet-950/30"] .text-white {
+html.light [class*="bg-violet-950/50"] .text-white:not(.teardown-badge):not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/70"] .text-white:not(.teardown-badge):not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/80"] .text-white:not(.teardown-badge):not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/90"] .text-white:not(.teardown-badge):not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/30"] .text-white:not(.teardown-badge):not(.teardown-equip-delta):not([class*="teardown"]) {
   color: #4c1d95 !important;
   font-weight: 800 !important;
 }
 
-html.light [class*="bg-violet-950/50"] [class*="text-violet-300"],
-html.light [class*="bg-violet-950/70"] [class*="text-violet-300"],
-html.light [class*="bg-violet-950/80"] [class*="text-violet-300"],
-html.light [class*="bg-violet-950/90"] [class*="text-violet-300"],
-html.light [class*="bg-violet-950/30"] [class*="text-violet-300"] {
+html.light [class*="bg-violet-950/50"] [class*="text-violet-300"]:not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/70"] [class*="text-violet-300"]:not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/80"] [class*="text-violet-300"]:not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/90"] [class*="text-violet-300"]:not(.teardown-equip-delta):not([class*="teardown"]),
+html.light [class*="bg-violet-950/30"] [class*="text-violet-300"]:not(.teardown-equip-delta):not([class*="teardown"]) {
   color: #6d28d9 !important;
   font-weight: 800 !important;
 }
@@ -531,16 +531,33 @@ html.light [class*="bg-emerald-900/90"] * {
   color: #ffffff !important;
 }
 
-/* Teardown Badge (TD) pill */
-html.light [class*="bg-violet-900"],
-html.light [class*="bg-violet-900/90"] {
-  background-color: #7c3aed !important;
+/* Teardown Badge (TD) pill & Equipment Delta - Always Crisp High-Contrast White */
+.teardown-badge,
+html.light .teardown-badge,
+html.light [class*="teardown-badge"],
+html.light span.teardown-badge {
+  background-color: #581c87 !important;
   color: #ffffff !important;
-  border-color: #6d28d9 !important;
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
 }
-html.light [class*="bg-violet-900"] *,
-html.light [class*="bg-violet-900/90"] * {
+.teardown-badge *,
+html.light .teardown-badge *,
+html.light [class*="teardown-badge"] *,
+html.light span.teardown-badge * {
   color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 900 !important;
+}
+
+.teardown-equip-delta,
+html.light .teardown-equip-delta,
+html.light [class*="teardown-equip-delta"],
+html.light .teardown-equip-delta *,
+html.light [class*="teardown-equip-delta"] * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  font-weight: 900 !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45) !important;
 }
 
 /* Daily Delta Banner (Top of cell) */
@@ -553,12 +570,14 @@ html.light [title*="Install Day"] * {
   color: #065f46 !important;
 }
 
-html.light [title*="Teardown Day"] {
+html.light div[title*="Teardown Day: Equipment recovered"],
+html.light div[title^="Teardown Day:"] {
   background-color: #ede9fe !important;
   color: #5b21b6 !important;
   border-color: #a78bfa !important;
 }
-html.light [title*="Teardown Day"] * {
+html.light div[title*="Teardown Day: Equipment recovered"] *,
+html.light div[title^="Teardown Day:"] * {
   color: #5b21b6 !important;
 }
 
