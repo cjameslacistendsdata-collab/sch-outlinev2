@@ -1043,7 +1043,7 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                                 {isTeardown && (
                                                   <span
                                                     title={`Teardown Day (${day.dayName}) - Returns ${proj.equipmentCount} ${equipType} back to inventory`}
-                                                    className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-600 text-white tracking-wider shadow-sm"
+                                                    className="teardown-badge px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-950/90 text-white tracking-wider shadow-sm border border-white/40"
                                                   >
                                                     TEARDOWN
                                                   </span>
@@ -1065,7 +1065,7 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                                   </span>
                                                 )}
                                                 {isTeardown && (
-                                                  <span className="text-violet-300 flex items-center gap-0.5">
+                                                  <span className="teardown-equip-delta text-white font-black flex items-center gap-0.5">
                                                     <span>+{techUnits}</span>
                                                     <span>{equipType === 'Camera' ? 'Cam' : 'Mach'}</span>
                                                   </span>
