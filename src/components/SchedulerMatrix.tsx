@@ -1141,15 +1141,6 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                                   <span>+ Add Note</span>
                                                 </button>
                                               )}
-
-                                              {locLabel && (
-                                                <span
-                                                  className="truncate max-w-[80px] bg-slate-900/90 text-[8px] text-slate-300 px-1 py-0.2 rounded border border-white/10 shrink-0 font-mono"
-                                                  title={`Designated Location: ${proj.locationId || locLabel}`}
-                                                >
-                                                  {locLabel}
-                                                </span>
-                                              )}
                                             </div>
                                           </>
                                         );
