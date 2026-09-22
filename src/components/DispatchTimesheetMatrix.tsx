@@ -685,7 +685,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                   {/* Technician Rows */}
                   {regionTechs.map((tech) => {
                     // Equipment stats
-                    const overallStats = getTechOverallEquipmentStats(tech, projects);
+                    const overallStats = getTechOverallEquipmentStats(tech, projects, undefined, undefined, activeWeekId);
 
                     // Weekly hours calculation for this technician (only counting days with projects)
                     const techWeeklyCalc = calculateTechWeeklyHours(getEffectiveHoursForTech(tech.name), tech.name);
@@ -1055,7 +1055,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                           )}
 
                                           <span className="font-mono text-[10px] text-sky-700 dark:text-sky-300 font-bold shrink-0 ml-auto">
-                                            {p.equipmentCount > 0 ? `⇄ ${p.equipmentCount} CAMS` : ''}
+                                            {p.equipmentCount > 0 ? `-${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
                                           </span>
                                         </div>
                                       </div>
