@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Project, WeekDay, DateColumn, Technician } from '../types';
 import {
   Clock,
@@ -32,7 +32,12 @@ import {
 import { exportProjectsToCSV, WEEK_DAYS } from '../utils/statusEngine';
 import { getTechOverallEquipmentStats } from '../utils/equipmentEngine';
 import { shouldShowProjectEventOnDay, isTeardownRollover } from '../utils/workWeekEngine';
-import { getIndividualTechList, isProjectAssignedToTech, splitTechnicianNames } from '../utils/technicianUtils';
+import {
+  getIndividualTechList,
+  isProjectAssignedToTech,
+  splitTechnicianNames,
+  formatLocationList,
+} from '../utils/technicianUtils';
 
 interface DispatchTimesheetMatrixProps {
   projects: Project[];
@@ -226,7 +231,11 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           (p) =>
             isProjectAssignedToTech(p.technician, t.name) &&
             (p.id.toLowerCase().includes(q) ||
+              (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
               p.cityState?.toLowerCase().includes(q) ||
+              (p.technician && p.technician.toLowerCase().includes(q)) ||
+              (p.locationId && p.locationId.toLowerCase().includes(q)) ||
+              (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q))) ||
               p.studyType?.toLowerCase().includes(q))
         );
         return matchesTech || hasMatchingJob;
@@ -234,6 +243,19 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
     }
     return list;
   }, [techList, selectedRegion, activeSearch, projects]);
+
+  // Focus View: Auto-scroll to matching project or tech on active search (per PDF Section 2)
+  useEffect(() => {
+    if (activeSearch && activeSearch.trim().length >= 2) {
+      const timer = setTimeout(() => {
+        const matchEl = document.querySelector('.dispatch-search-highlight');
+        if (matchEl) {
+          matchEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+  }, [activeSearch]);
 
   const allRegions = useMemo(() => {
     const presentRegions = Array.from(new Set(filteredTechs.map((t) => t.region || 'TX (Dallas)')));
@@ -695,10 +717,18 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                       (p) => isProjectAssignedToTech(p.technician, tech.name)
                     );
 
+                    const isTechSearchMatch = Boolean(
+                      activeSearch.trim() && tech.name.toLowerCase().includes(activeSearch.trim().toLowerCase())
+                    );
+
                     return (
                       <tr key={tech.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                         {/* 1. Left Technician Column with Colored Gradient Header */}
-                        <td className={`p-2 border border-slate-300 dark:border-slate-700/80 text-xs font-semibold select-none shadow-xs ${getTechHeaderStyle(tech.colorGroup)}`}>
+                        <td className={`p-2 border border-slate-300 dark:border-slate-700/80 text-xs font-semibold select-none shadow-xs ${
+                          isTechSearchMatch
+                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-500/40 text-yellow-100 dispatch-search-highlight'
+                            : ''
+                        } ${getTechHeaderStyle(tech.colorGroup)}`}>
                           <div className="flex flex-col gap-1">
                             {/* Name and Quick Add Action */}
                             <div className="flex items-center justify-between">
@@ -897,12 +927,28 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                     const coTechs = assignedTechs.filter(
                                       (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
                                     );
+                                    const q = activeSearch.trim().toLowerCase();
+                                    const isJobMatch = Boolean(
+                                      q &&
+                                      (
+                                        p.id.toLowerCase().includes(q) ||
+                                        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
+                                        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
+                                        (p.technician && p.technician.toLowerCase().includes(q)) ||
+                                        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
+                                        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q)))
+                                      )
+                                    );
 
                                     return (
                                       <div
                                         key={`inst-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-emerald-500/80 bg-emerald-50 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-100 dark:hover:bg-emerald-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className={`p-1.5 rounded text-[11px] border border-emerald-500/80 hover:bg-emerald-100 dark:hover:bg-emerald-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
+                                          isJobMatch
+                                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
+                                            : 'bg-emerald-50 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100'
+                                        }`}
                                       >
                                         {/* Row 1: Badges ON TOP (INSTALL, COD, PRIORITY) */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
@@ -927,9 +973,19 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
                                           <ArrowDownCircle className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                                           <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
-                                            {p.id}
+                                            {p.projectNumber || p.id}
                                           </span>
                                         </div>
+                                        {/* Row 2.5: Grouped Locations Display Format */}
+                                        {(() => {
+                                          const locListStr = formatLocationList(p, tech.name);
+                                          if (!locListStr) return null;
+                                          return (
+                                            <div className="text-[9px] font-mono font-semibold tracking-tight text-emerald-800 dark:text-emerald-300">
+                                              • Loc: {locListStr}
+                                            </div>
+                                          );
+                                        })()}
 
                                         {/* Row 3: Co-assigned technicians if any */}
                                         {coTechs.length > 0 && (
@@ -983,12 +1039,28 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                     const coTechs = assignedTechs.filter(
                                       (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
                                     );
+                                    const q = activeSearch.trim().toLowerCase();
+                                    const isJobMatch = Boolean(
+                                      q &&
+                                      (
+                                        p.id.toLowerCase().includes(q) ||
+                                        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
+                                        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
+                                        (p.technician && p.technician.toLowerCase().includes(q)) ||
+                                        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
+                                        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q)))
+                                      )
+                                    );
 
                                     return (
                                       <div
                                         key={`bat-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-sky-500/80 bg-sky-50 dark:bg-sky-950/90 text-sky-950 dark:text-sky-100 hover:bg-sky-100 dark:hover:bg-sky-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className={`p-1.5 rounded text-[11px] border border-sky-500/80 hover:bg-sky-100 dark:hover:bg-sky-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
+                                          isJobMatch
+                                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
+                                            : 'bg-sky-50 dark:bg-sky-950/90 text-sky-950 dark:text-sky-100'
+                                        }`}
                                       >
                                         {/* Row 1: Badges ON TOP (SWAP, COD, PRIORITY) */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
@@ -1013,9 +1085,19 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
                                           <RefreshCw className="w-2.5 h-2.5 text-sky-600 dark:text-sky-400 shrink-0" />
                                           <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
-                                            {p.id}
+                                            {p.projectNumber || p.id}
                                           </span>
                                         </div>
+                                        {/* Row 2.5: Grouped Locations Display Format */}
+                                        {(() => {
+                                          const locListStr = formatLocationList(p, tech.name);
+                                          if (!locListStr) return null;
+                                          return (
+                                            <div className="text-[9px] font-mono font-semibold tracking-tight text-sky-800 dark:text-sky-300">
+                                              • Loc: {locListStr}
+                                            </div>
+                                          );
+                                        })()}
 
                                         {/* Row 3: Co-assigned technicians if any */}
                                         {coTechs.length > 0 && (
@@ -1069,12 +1151,28 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                     const coTechs = assignedTechs.filter(
                                       (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
                                     );
+                                    const q = activeSearch.trim().toLowerCase();
+                                    const isJobMatch = Boolean(
+                                      q &&
+                                      (
+                                        p.id.toLowerCase().includes(q) ||
+                                        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
+                                        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
+                                        (p.technician && p.technician.toLowerCase().includes(q)) ||
+                                        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
+                                        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q)))
+                                      )
+                                    );
 
                                     return (
                                       <div
                                         key={`td-${p.id}`}
                                         onClick={() => onSelectProject(p)}
-                                        className="p-1.5 rounded text-[11px] border border-violet-400 dark:border-violet-500/80 bg-violet-100/70 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-200/80 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5"
+                                        className={`p-1.5 rounded text-[11px] border border-violet-400 dark:border-violet-500/80 hover:bg-violet-200/80 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
+                                          isJobMatch
+                                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
+                                            : 'bg-violet-100/70 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100'
+                                        }`}
                                       >
                                         {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) + Equipment Count Top Right */}
                                         <div className="flex items-center justify-between gap-1 mb-0.5">
@@ -1110,12 +1208,22 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                                         </div>
 
                                         {/* Row 2: Project Number with Full Space */}
-                                        <div className="flex items-center gap-1 font-mono font-black text-slate-950 dark:text-white min-w-0">
+                                        <div className="flex items-center gap-1 font-mono font-black text-violet-950 dark:text-white min-w-0">
                                           <ArrowUpCircle className="w-2.5 h-2.5 text-violet-800 dark:text-violet-400 shrink-0" />
                                           <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
-                                            {p.id}
+                                            {p.projectNumber || p.id}
                                           </span>
                                         </div>
+                                        {/* Row 2.5: Grouped Locations Display Format */}
+                                        {(() => {
+                                          const locListStr = formatLocationList(p, tech.name);
+                                          if (!locListStr) return null;
+                                          return (
+                                            <div className="text-[9px] font-mono font-semibold tracking-tight text-violet-900 dark:text-violet-200">
+                                              • Loc: {locListStr}
+                                            </div>
+                                          );
+                                        })()}
 
                                         {/* Row 3: Co-assigned technicians if any */}
                                         {coTechs.length > 0 && (
