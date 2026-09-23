@@ -2,6 +2,59 @@ import { Technician, Project } from '../types';
 import { TECHNICIANS } from '../data/technicians';
 
 /**
+ * Direct Primary Key mappings for project ID to technician.
+ * Fixes misallocated technician assignment bug and mapping key collisions.
+ * 26-470296 => Gavin (Gavin Adams)
+ * 26-240026 => Gilliam (Gilliam Johns)
+ */
+export const DIRECT_PROJECT_TECHNICIAN_PRIMARY_KEYS: Record<string, string> = {
+  '26-470296': 'Gavin Adams',
+  '26-240026': 'Gilliam Johns',
+};
+
+/**
+ * Extract the location number by taking the substring after the last dash (-) of the Location ID
+ * (e.g., 26-480132-001 -> 001).
+ */
+export function extractLocationNumber(locId: string | undefined | null): string {
+  if (!locId) return '';
+  const trimmed = locId.trim();
+  const lastDashIdx = trimmed.lastIndexOf('-');
+  if (lastDashIdx !== -1 && lastDashIdx < trimmed.length - 1) {
+    return trimmed.substring(lastDashIdx + 1).trim();
+  }
+  return trimmed;
+}
+
+/**
+ * Formats grouped locations for the Schedule Board UI:
+ * "• Loc: 001, 002, 003"
+ */
+export function formatLocationList(proj: Project, techName?: string): string {
+  let locs: string[] = [];
+  if (techName && proj.techLocations && proj.techLocations[techName] && proj.techLocations[techName].length > 0) {
+    locs = proj.techLocations[techName];
+  } else if (proj.locationIds && proj.locationIds.length > 0) {
+    locs = proj.locationIds;
+  } else if (proj.locationId) {
+    locs = proj.locationId.split(/[,;\/\s]+/).filter(Boolean);
+  }
+
+  const cleanLocs = Array.from(new Set(locs.map(extractLocationNumber).filter(Boolean)));
+  if (cleanLocs.length > 0) {
+    cleanLocs.sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    });
+    return cleanLocs.join(', ');
+  }
+
+  return '';
+}
+
+/**
  * Strips all quotation marks, backticks, escaped quotes, and extraneous leading/trailing spaces.
  */
 export function cleanTechName(str: string | undefined | null): string {
@@ -17,7 +70,7 @@ export function cleanTechName(str: string | undefined | null): string {
  * - First, Last: "Dustyn, May" -> Dustyn May
  * - Reversed two-word: "May Dustyn" -> Dustyn May
  * - Single token last name: "May" -> Dustyn May
- * - Single token first name: "Dustyn" -> Dustyn May
+ * - Single token first name: "Dustyn" -> Dustyn May, "Gavin" -> Gavin Adams, "Gilliam" -> Gilliam Johns
  */
 export function matchKnownTechnician(
   rawName: string | undefined | null,
@@ -27,6 +80,16 @@ export function matchKnownTechnician(
   if (!clean || clean.toLowerCase() === 'unassigned') return undefined;
 
   const lower = clean.toLowerCase();
+
+  // Explicit string matches for Gavin and Gilliam
+  if (lower === 'gavin' || lower.startsWith('gavin ')) {
+    const gavin = roster.find((t) => t.name.toLowerCase().includes('gavin'));
+    if (gavin) return gavin;
+  }
+  if (lower === 'gilliam' || lower.startsWith('gilliam ')) {
+    const gilliam = roster.find((t) => t.name.toLowerCase().includes('gilliam'));
+    if (gilliam) return gilliam;
+  }
 
   // 1. Direct full name match
   const directMatch = roster.find((t) => t.name.toLowerCase() === lower);
@@ -150,6 +213,95 @@ export function splitTechnicianNames(
   }
 
   return [clean];
+}
+
+/**
+ * Text Parser Update for Manage Technician input field.
+ * Explicitly recognizes commas without throwing syntax errors or truncating names.
+ * Supports standard "Last Name, First Name" strings (e.g., "Smith, John")
+ * and multi-select lists separated by commas (e.g. "Smith, John, Davis, Mark" or "John Smith, Mark Davis").
+ */
+export function parseTechnicianInputString(
+  rawInput: string | undefined | null,
+  roster: Technician[] = TECHNICIANS
+): string[] {
+  if (!rawInput) return [];
+  const clean = cleanTechName(rawInput);
+  if (!clean || clean.toLowerCase() === 'unassigned') return [];
+
+  // Check direct full match in roster first
+  const exactMatch = matchKnownTechnician(clean, roster);
+  if (exactMatch) {
+    return [exactMatch.name];
+  }
+
+  // Split by commas, slashes, semicolons
+  const rawParts = clean
+    .split(/[,;\/\n]+/)
+    .map((s) => cleanTechName(s))
+    .filter(Boolean);
+
+  if (rawParts.length === 0) return [];
+  if (rawParts.length === 1) {
+    const singleMatch = matchKnownTechnician(rawParts[0], roster);
+    return [singleMatch ? singleMatch.name : rawParts[0]];
+  }
+
+  const results: string[] = [];
+  let i = 0;
+
+  while (i < rawParts.length) {
+    const current = rawParts[i];
+    const next = i + 1 < rawParts.length ? rawParts[i + 1] : null;
+
+    // Check if current alone matches a known technician in roster
+    const currentMatch = matchKnownTechnician(current, roster);
+    const nextMatch = next ? matchKnownTechnician(next, roster) : null;
+
+    // If both current and next are independent known technicians (e.g. "Gavin, Gilliam"):
+    if (currentMatch && nextMatch && currentMatch.id !== nextMatch.id) {
+      if (!results.includes(currentMatch.name)) results.push(currentMatch.name);
+      i++;
+      continue;
+    }
+
+    // Check if (current, next) forms a "Last, First" pair: e.g. "Smith, John" or "Adams, Gavin"
+    if (next) {
+      // 1. Direct check against roster
+      const pairCandidate = `${current}, ${next}`;
+      const pairMatch = matchKnownTechnician(pairCandidate, roster);
+      if (pairMatch) {
+        if (!results.includes(pairMatch.name)) results.push(pairMatch.name);
+        i += 2;
+        continue;
+      }
+
+      // 2. Check if reversing them ("next current") forms a valid name: e.g. "Smith" and "John" -> "John Smith"
+      const currentWords = current.split(/\s+/).filter(Boolean);
+      const nextWords = next.split(/\s+/).filter(Boolean);
+      if (currentWords.length === 1 && nextWords.length === 1) {
+        const reversedCandidate = `${next} ${current}`;
+        const revMatch = matchKnownTechnician(reversedCandidate, roster);
+        if (revMatch) {
+          if (!results.includes(revMatch.name)) results.push(revMatch.name);
+        } else {
+          if (!results.includes(reversedCandidate)) results.push(reversedCandidate);
+        }
+        i += 2;
+        continue;
+      }
+    }
+
+    // Otherwise, treat current as a single entry
+    if (currentMatch) {
+      if (!results.includes(currentMatch.name)) results.push(currentMatch.name);
+    } else {
+      if (!results.includes(current)) results.push(current);
+    }
+    i++;
+  }
+
+  return results;
 }
 
 /**
