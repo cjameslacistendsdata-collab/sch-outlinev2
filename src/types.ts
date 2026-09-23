@@ -59,6 +59,7 @@ export type WeekDay =
 
 export interface Project {
   id: string; // Project # e.g. "26-460061"
+  projectNumber?: string; // Base project number e.g. "26-480132" without city or group suffix
   cityState: string; // e.g. "Manor, TX"
   opsStatus: OpsStatus; // Project Status (aligned with CSV)
   scheduleStatus: ScheduleStatus; // Schedule Status (SCHEDULE SENT, PENDING, or blank)
