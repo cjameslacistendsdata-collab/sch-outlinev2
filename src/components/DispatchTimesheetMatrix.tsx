@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Project, WeekDay, DateColumn, Technician } from '../types';
 import {
   Clock,
@@ -66,6 +66,191 @@ const REGION_ORDER = [
   'Field Fleet',
 ];
 
+interface DayJobs {
+  installs: Project[];
+  batterySwaps: Project[];
+  teardowns: Project[];
+}
+
+const EMPTY_DAY_JOBS: DayJobs = {
+  installs: [],
+  batterySwaps: [],
+  teardowns: [],
+};
+
+// Modular, clean job card component for Installs, Battery Swaps, and Teardowns
+interface DispatchJobCardProps {
+  project: Project;
+  eventType: 'install' | 'battery_swap' | 'teardown';
+  technicianName: string;
+  allowCOD?: boolean;
+  isSearchMatch: boolean;
+  onSelect: (p: Project) => void;
+  onOpenNotes: (e: React.MouseEvent, p: Project) => void;
+}
+
+const DispatchJobCard: React.FC<DispatchJobCardProps> = React.memo(({
+  project,
+  eventType,
+  technicianName,
+  allowCOD,
+  isSearchMatch,
+  onSelect,
+  onOpenNotes,
+}) => {
+  const pGroup = project.group || project.specialBadge;
+  const assignedTechs = splitTechnicianNames(project.technician);
+  const coTechs = assignedTechs.filter(
+    (t) => t.toLowerCase() !== technicianName.trim().toLowerCase()
+  );
+
+  const locListStr = formatLocationList(project, technicianName);
+  const isTeardown = eventType === 'teardown';
+  const isSwap = eventType === 'battery_swap';
+  const isInstall = eventType === 'install';
+
+  // Base card styles by event type
+  let baseCardStyle = 'border-emerald-500/80 bg-emerald-50 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-100 dark:hover:bg-emerald-900';
+  if (isSwap) {
+    baseCardStyle = 'border-sky-500/80 bg-sky-50 dark:bg-sky-950/90 text-sky-950 dark:text-sky-100 hover:bg-sky-100 dark:hover:bg-sky-900';
+  } else if (isTeardown) {
+    baseCardStyle = 'border-violet-400 dark:border-violet-500/80 bg-violet-100/70 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100 hover:bg-violet-200/80 dark:hover:bg-violet-900';
+  }
+
+  return (
+    <div
+      onClick={() => onSelect(project)}
+      className={`p-1.5 rounded text-[11px] border shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
+        isSearchMatch
+          ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
+          : baseCardStyle
+      }`}
+    >
+      {/* Row 1: Badges ON TOP (COD, PRIORITY, EVENT TYPE) + Top-right Teardown count */}
+      <div className="flex items-center justify-between gap-1 mb-0.5">
+        <div className="flex items-center gap-1 shrink-0 flex-wrap">
+          {allowCOD && pGroup === 'COD' && (
+            <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-sm">
+              COD
+            </span>
+          )}
+          {pGroup === 'PRIORITY' && (
+            <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-purple-600 text-white tracking-wider shadow-sm">
+              PRIORITY
+            </span>
+          )}
+          {isInstall && (
+            <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-emerald-600 text-white tracking-wider font-bold shadow-sm">
+              INSTALL
+            </span>
+          )}
+          {isSwap && (
+            <span className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-sky-500 text-slate-950 tracking-wider font-bold shadow-sm">
+              SWAP
+            </span>
+          )}
+          {isTeardown && (
+            isTeardownRollover(project) ? (
+              <span
+                title={`Rollover Teardown from previous week install on ${project.installDay}`}
+                className="teardown-badge px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-violet-800 dark:bg-violet-950 text-white tracking-wider border border-violet-900/40 shadow-sm"
+              >
+                ROLLOVER TD 🔄
+              </span>
+            ) : (
+              <span className="teardown-badge px-1.5 py-0.5 rounded text-[8px] font-black uppercase bg-violet-800 dark:bg-violet-950/90 text-white tracking-wider font-black shadow-sm border border-violet-900/40">
+                TEARDOWN
+              </span>
+            )
+          )}
+        </div>
+
+        {/* Teardown returns equipment: count displayed top-right in high-contrast text */}
+        {isTeardown && (
+          <span className="teardown-equip-delta font-mono text-[10px] text-violet-950 dark:text-white font-black shrink-0 ml-auto tracking-wide">
+            {project.equipmentCount > 0 ? `+${project.equipmentCount} ${project.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
+          </span>
+        )}
+      </div>
+
+      {/* Row 2: Project Number */}
+      <div className={`flex items-center gap-1 font-mono font-bold min-w-0 ${
+        isTeardown ? 'text-violet-950 dark:text-white font-black' : 'text-slate-900 dark:text-white'
+      }`}>
+        {isInstall && <ArrowDownCircle className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />}
+        {isSwap && <RefreshCw className="w-2.5 h-2.5 text-sky-600 dark:text-sky-400 shrink-0" />}
+        {isTeardown && <ArrowUpCircle className="w-2.5 h-2.5 text-violet-800 dark:text-violet-400 shrink-0" />}
+        <span className="truncate text-[11px]" title={`${project.id}${project.cityState ? ` • ${project.cityState}` : ''}`}>
+          {project.projectNumber || project.id}
+        </span>
+      </div>
+
+      {/* Row 2.5: Grouped Locations Display Format (e.g. "• Loc: 001, 002, 003") */}
+      {locListStr && (
+        <div className={`text-[9px] font-mono font-semibold tracking-tight ${
+          isSearchMatch
+            ? 'text-slate-950 font-bold'
+            : isInstall
+            ? 'text-emerald-800 dark:text-emerald-300'
+            : isSwap
+            ? 'text-sky-800 dark:text-sky-300'
+            : 'text-violet-900 dark:text-violet-200'
+        }`}>
+          • Loc: {locListStr}
+        </div>
+      )}
+
+      {/* Row 3: Co-assigned technicians if any */}
+      {coTechs.length > 0 && (
+        <div className="flex items-center mt-0.5">
+          <span
+            title={`Co-assigned with ${coTechs.join(', ')}`}
+            className="px-1 py-0.5 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
+          >
+            👥 Co: {coTechs.join(', ')}
+          </span>
+        </div>
+      )}
+
+      {/* Row 4: Notes Button (Left) + Equipment count deduction (Right for installs & swaps) */}
+      <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
+        {project.schedulerNotes ? (
+          <button
+            type="button"
+            onClick={(e) => onOpenNotes(e, project)}
+            title={`Note: ${project.schedulerNotes} (Click to edit)`}
+            className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
+          >
+            <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="truncate flex-1 font-sans">{project.schedulerNotes}</span>
+            <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => onOpenNotes(e, project)}
+            title="Add note for this project"
+            className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
+          >
+            <FileText className="w-2.5 h-2.5 shrink-0" />
+            <span>+ Add Note</span>
+          </button>
+        )}
+
+        {!isTeardown && project.equipmentCount > 0 && (
+          <span className={`font-mono text-[10px] font-bold shrink-0 ml-auto ${
+            isInstall ? 'text-emerald-700 dark:text-emerald-300' : 'text-sky-700 dark:text-sky-300'
+          }`}>
+            -{project.equipmentCount} {project.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
+DispatchJobCard.displayName = 'DispatchJobCard';
+
 export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = ({
   projects,
   technicians,
@@ -76,7 +261,6 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
   onOpenResetSchedule,
   onSelectProject,
   onQuickAddJob,
-  onUpdateProjectGroup,
   onAssignCODForTech,
   onToggleDayGroup,
   searchTerm = '',
@@ -87,11 +271,11 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
   const [notesModalProject, setNotesModalProject] = useState<Project | null>(null);
   const [editingNoteText, setEditingNoteText] = useState<string>('');
 
-  const handleOpenNotes = (e: React.MouseEvent, project: Project) => {
+  const handleOpenNotes = useCallback((e: React.MouseEvent, project: Project) => {
     e.stopPropagation();
     setNotesModalProject(project);
     setEditingNoteText(project.schedulerNotes || '');
-  };
+  }, []);
 
   const handleSaveNote = () => {
     if (!notesModalProject) return;
@@ -102,6 +286,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
     notesModalProject.schedulerNotes = trimmed;
     setNotesModalProject(null);
   };
+
   // Region filter: defaults to 'all' or specific region
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
 
@@ -109,11 +294,10 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
   const [internalSearch, setInternalSearch] = useState<string>('');
   const activeSearch = searchTerm || internalSearch;
 
-  // Group filter: 'all' | 'COD' | 'LADOT' | 'PRIORITY'
+  // Group filter: 'all' | 'COD' | 'PRIORITY'
   const [groupFilter, setGroupFilter] = useState<string>('all');
 
   // Sync technicians directly from Monitoring Sheet projects so no technicians or projects are missed
-  // When multiple technicians are assigned to a project, do not group them: each individual tech gets their own row
   const techList = useMemo(() => {
     return getIndividualTechList(projects, technicians);
   }, [technicians, projects]);
@@ -159,39 +343,6 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
     }
   };
 
-  // Auto-estimate hours from scheduled projects
-  const handleAutoEstimate = () => {
-    const estimated: Record<string, string> = {};
-    techList.forEach((tech) => {
-      const techName = tech.name;
-      const targetTech = techName.trim().toLowerCase();
-      WEEK_DAYS_ORDER.forEach((dayName) => {
-        const installs = projects.filter((p) => {
-          const isAssigned = isProjectAssignedToTech(p.technician, techName);
-          return isAssigned && shouldShowProjectEventOnDay(p, 'install', dayName, activeWeekId);
-        });
-        const teardowns = projects.filter((p) => {
-          const isAssigned = isProjectAssignedToTech(p.technician, techName);
-          return isAssigned && shouldShowProjectEventOnDay(p, 'teardown', dayName, activeWeekId);
-        });
-        const estStr = estimateHoursFromProjects(installs, teardowns);
-        if (estStr !== '0:00:00') {
-          estimated[`${techName}_${dayName}`] = estStr;
-        }
-      });
-    });
-
-    setDailyHours((prev) => {
-      const updated: Record<string, string> = { ...(prev || {}), ...estimated };
-      try {
-        localStorage.setItem('nds_dispatch_timesheet_hours', JSON.stringify(updated));
-      } catch (e) {
-        console.error('Failed to save estimated hours:', e);
-      }
-      return updated;
-    });
-  };
-
   // 7 Days list from active sheet date columns or standard Sunday through Saturday
   const daysList: { dayName: WeekDay; dateStr: string; isToday?: boolean }[] = useMemo(() => {
     if (dateColumns && dateColumns.length === 7) {
@@ -209,10 +360,104 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
     }));
   }, [dateColumns]);
 
+  // High-performance indexed map for all jobs by tech and day: O(1) lookup
+  const jobsByTechAndDay = useMemo(() => {
+    const map = new Map<string, DayJobs>();
+
+    const activeProjects = groupFilter === 'all'
+      ? projects
+      : projects.filter((p) => {
+          const pGroup = (p.group || p.specialBadge || '').toLowerCase();
+          return pGroup === groupFilter.toLowerCase();
+        });
+
+    for (const p of activeProjects) {
+      if (!p.technician) continue;
+      const assignedTechs = splitTechnicianNames(p.technician);
+      for (const techName of assignedTechs) {
+        const normTech = techName.trim().toLowerCase();
+
+        for (const dayName of WEEK_DAYS_ORDER) {
+          const isInstall = shouldShowProjectEventOnDay(p, 'install', dayName, activeWeekId);
+          const isSwap = shouldShowProjectEventOnDay(p, 'battery_swap', dayName, activeWeekId);
+          const isTeardown = shouldShowProjectEventOnDay(p, 'teardown', dayName, activeWeekId);
+
+          if (isInstall || isSwap || isTeardown) {
+            const key = `${normTech}__${dayName}`;
+            let entry = map.get(key);
+            if (!entry) {
+              entry = { installs: [], batterySwaps: [], teardowns: [] };
+              map.set(key, entry);
+            }
+            if (isInstall) entry.installs.push(p);
+            if (isSwap) entry.batterySwaps.push(p);
+            if (isTeardown) entry.teardowns.push(p);
+          }
+        }
+      }
+    }
+
+    return map;
+  }, [projects, groupFilter, activeWeekId]);
+
+  // Fast O(1) getter for tech jobs on a specific day
+  const getTechDayJobs = useCallback((techName: string, dayName: WeekDay): DayJobs => {
+    const key = `${techName.trim().toLowerCase()}__${dayName}`;
+    return jobsByTechAndDay.get(key) || EMPTY_DAY_JOBS;
+  }, [jobsByTechAndDay]);
+
+  // Check if technician has any projects on day
+  const techHasProjectsOnDay = useCallback((techName: string, dayName: WeekDay): boolean => {
+    const jobs = getTechDayJobs(techName, dayName);
+    return (jobs.installs.length + jobs.batterySwaps.length + jobs.teardowns.length) > 0;
+  }, [getTechDayJobs]);
+
+  // Auto-estimate hours from scheduled projects
+  const handleAutoEstimate = () => {
+    const estimated: Record<string, string> = {};
+    techList.forEach((tech) => {
+      const techName = tech.name;
+      WEEK_DAYS_ORDER.forEach((dayName) => {
+        const dayJobs = getTechDayJobs(techName, dayName);
+        const estStr = estimateHoursFromProjects(dayJobs.installs, dayJobs.teardowns);
+        if (estStr !== '0:00:00') {
+          estimated[`${techName}_${dayName}`] = estStr;
+        }
+      });
+    });
+
+    setDailyHours((prev) => {
+      const updated: Record<string, string> = { ...(prev || {}), ...estimated };
+      try {
+        localStorage.setItem('nds_dispatch_timesheet_hours', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Failed to save estimated hours:', e);
+      }
+      return updated;
+    });
+  };
+
   // Available unique regions
   const availableRegions = useMemo(() => {
     return Array.from(new Set(techList.map((t) => t.region || 'TX (Dallas)')));
   }, [techList]);
+
+  // Fast precompiled search matcher
+  const isProjectSearchMatch = useMemo(() => {
+    const q = activeSearch.trim().toLowerCase();
+    if (!q) return () => false;
+    return (p: Project) => {
+      return Boolean(
+        p.id.toLowerCase().includes(q) ||
+        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
+        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
+        (p.technician && p.technician.toLowerCase().includes(q)) ||
+        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
+        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q))) ||
+        (p.studyType && p.studyType.toLowerCase().includes(q))
+      );
+    };
+  }, [activeSearch]);
 
   // Filter technicians by region and search term
   const filteredTechs = useMemo(() => {
@@ -228,23 +473,15 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           t.team.toLowerCase().includes(q) ||
           t.region?.toLowerCase().includes(q);
         const hasMatchingJob = projects.some(
-          (p) =>
-            isProjectAssignedToTech(p.technician, t.name) &&
-            (p.id.toLowerCase().includes(q) ||
-              (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
-              p.cityState?.toLowerCase().includes(q) ||
-              (p.technician && p.technician.toLowerCase().includes(q)) ||
-              (p.locationId && p.locationId.toLowerCase().includes(q)) ||
-              (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q))) ||
-              p.studyType?.toLowerCase().includes(q))
+          (p) => isProjectAssignedToTech(p.technician, t.name) && isProjectSearchMatch(p)
         );
         return matchesTech || hasMatchingJob;
       });
     }
     return list;
-  }, [techList, selectedRegion, activeSearch, projects]);
+  }, [techList, selectedRegion, activeSearch, projects, isProjectSearchMatch]);
 
-  // Focus View: Auto-scroll to matching project or tech on active search (per PDF Section 2)
+  // Focus View: Auto-scroll to matching project or tech on active search
   useEffect(() => {
     if (activeSearch && activeSearch.trim().length >= 2) {
       const timer = setTimeout(() => {
@@ -264,42 +501,8 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
     return [...ordered, ...others];
   }, [filteredTechs]);
 
-  // Helper to fetch jobs for a technician on a specific day
-  const getTechJobsForDay = (
-    techName: string,
-    dayName: WeekDay,
-    eventType: 'install' | 'teardown' | 'battery_swap'
-  ): Project[] => {
-    return projects.filter((p) => {
-      const isAssigned = isProjectAssignedToTech(p.technician, techName);
-      if (!isAssigned) return false;
-
-      // Group filter
-      if (groupFilter !== 'all') {
-        const pGroup = (p.group || p.specialBadge || '').toLowerCase();
-        if (pGroup !== groupFilter.toLowerCase()) return false;
-      }
-
-      if (eventType === 'install') {
-        return shouldShowProjectEventOnDay(p, 'install', dayName, activeWeekId);
-      } else if (eventType === 'battery_swap') {
-        return shouldShowProjectEventOnDay(p, 'battery_swap', dayName, activeWeekId);
-      } else {
-        return shouldShowProjectEventOnDay(p, 'teardown', dayName, activeWeekId);
-      }
-    });
-  };
-
-  // Check if a technician has any projects (install, teardown, battery swap) on a given day
-  const techHasProjectsOnDay = (techName: string, dayName: WeekDay): boolean => {
-    const installs = getTechJobsForDay(techName, dayName, 'install');
-    const batterySwaps = getTechJobsForDay(techName, dayName, 'battery_swap');
-    const teardowns = getTechJobsForDay(techName, dayName, 'teardown');
-    return installs.length + batterySwaps.length + teardowns.length > 0;
-  };
-
   // Get effective hours for a technician (zero on days without projects)
-  const getEffectiveHoursForTech = (techName: string) => {
+  const getEffectiveHoursForTech = useCallback((techName: string) => {
     const effective: Record<string, string> = {};
     WEEK_DAYS_ORDER.forEach((day) => {
       const key = `${techName}_${day}`;
@@ -310,9 +513,9 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
       }
     });
     return effective;
-  };
+  }, [dailyHours, techHasProjectsOnDay]);
 
-  // Deduplicated jobs count and team stats (only counting days with projects)
+  // Deduplicated jobs count and team stats
   const teamStats = useMemo(() => {
     let totalSec = 0;
     let overtimeCount = 0;
@@ -323,7 +526,6 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
       if (calc.isOvertime) overtimeCount++;
     });
 
-    // Deduplicate jobs assigned to any of the filtered techs
     const uniqueProjectIds = new Set<string>();
     projects.forEach((p) => {
       const isAssignedToFiltered = filteredTechs.some((t) => {
@@ -351,7 +553,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
       totalTechs: filteredTechs.length,
       totalJobs: totalUniqueJobs,
     };
-  }, [filteredTechs, dailyHours, projects, groupFilter]);
+  }, [filteredTechs, projects, groupFilter, getEffectiveHoursForTech]);
 
   // Daily Fleet Totals for the footer row
   const dailyFleetTotals = useMemo(() => {
@@ -380,7 +582,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
       byDay: totals,
       grandTotalStr: formatSecondsToDuration(totalFleetSec),
     };
-  }, [filteredTechs, dailyHours]);
+  }, [filteredTechs, dailyHours, techHasProjectsOnDay]);
 
   // CSV Export handler
   const handleExportTimesheet = () => {
@@ -411,9 +613,9 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
 
   return (
     <div className="space-y-4">
-      {/* Top Controls Toolbar - Clean White Background */}
+      {/* Top Controls Toolbar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 sm:p-4 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        {/* Left: Title & Region selector */}
+        {/* Left: Title & Filter controls */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black shadow-sm">
@@ -449,13 +651,47 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
             </select>
           </div>
 
+          {/* Group Filter (All / COD / Priority) */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs">
+            <button
+              onClick={() => setGroupFilter('all')}
+              className={`px-2 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                groupFilter === 'all'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              All Jobs
+            </button>
+            <button
+              onClick={() => setGroupFilter('cod')}
+              className={`px-2 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                groupFilter === 'cod'
+                  ? 'bg-[#ff00bf] text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              COD
+            </button>
+            <button
+              onClick={() => setGroupFilter('priority')}
+              className={`px-2 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
+                groupFilter === 'priority'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Priority
+            </button>
+          </div>
+
           {/* Hours Display Mode Toggle */}
           <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-0.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs">
             <button
               onClick={() => setHoursMode('daily')}
               className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
                 hoursMode === 'daily'
-                  ? 'bg-blue-600 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -465,7 +701,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
               onClick={() => setHoursMode('cumulative')}
               className={`px-2.5 py-1 rounded-md font-semibold transition-colors cursor-pointer ${
                 hoursMode === 'cumulative'
-                  ? 'bg-blue-600 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
@@ -489,7 +725,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
             {allowCOD && (
               <>
                 <span className="text-slate-300 dark:text-slate-600">•</span>
-                <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-[#ff00bf] text-white">
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-[#ff00bf] text-white">
                   COD
                 </span>
               </>
@@ -515,7 +751,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
               id="btn-clear-reset-dispatch"
               onClick={onOpenResetSchedule}
               title="Clear or Reset Dispatch & Timesheet and Scheduler Matrix"
-              className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-bold shadow-sm transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3 h-3 text-rose-500" />
               <span>Clear / Reset</span>
@@ -523,9 +759,18 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           )}
 
           <button
+            onClick={handleAutoEstimate}
+            title="Auto-calculate hours from scheduled installs and teardowns"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 rounded-lg text-xs font-bold shadow-sm transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+            <span>Auto Calculate</span>
+          </button>
+
+          <button
             onClick={handleResetToDefaults}
             title="Reset hours to match Houston handwritten dispatch sheet"
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
           >
             <RotateCcw className="w-3 h-3 text-slate-500" />
             <span>Reset Hours</span>
@@ -542,9 +787,9 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
         </div>
       </div>
 
-      {/* Summary Metrics Bar - Clean 4-Card Grid with White Background (Removed Cancelled/Struck) */}
+      {/* Summary Metrics Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-sm">
           <div>
             <div className="text-[11px] font-bold text-slate-700 dark:text-slate-400">Total Unique Jobs</div>
             <div className="text-xl font-black text-slate-900 dark:text-white font-mono mt-0.5">
@@ -557,7 +802,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-sm">
           <div>
             <div className="text-[11px] font-bold text-slate-700 dark:text-slate-400">Total Fleet Hours</div>
             <div className="text-xl font-black text-cyan-600 dark:text-cyan-400 font-mono mt-0.5">
@@ -570,7 +815,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-sm">
           <div>
             <div className="text-[11px] font-bold text-slate-700 dark:text-slate-400">Average Tech Hours</div>
             <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
@@ -583,7 +828,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-xs">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between shadow-sm">
           <div>
             <div className="text-[11px] font-bold text-slate-700 dark:text-slate-400">Overtime Alerts (&gt;40h)</div>
             <div className={`text-xl font-black mt-0.5 font-mono ${teamStats.overtimeCount > 0 ? 'text-amber-600 dark:text-amber-500' : 'text-slate-800 dark:text-slate-300'}`}>
@@ -611,7 +856,8 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
             ))}
             <col className="w-24 sm:w-28" />
           </colgroup>
-          {/* Header Rows Matching Scheduler Matrix: Green Date Numbers & Yellow Day Names */}
+
+          {/* Header Rows: Green Date Numbers & Yellow Day Names */}
           <thead>
             {/* Header Row 1: Green Date Numbers */}
             <tr>
@@ -634,7 +880,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
                   <div className="flex items-center justify-center gap-1 font-mono">
                     <span className="text-sm font-black">{day.dateStr}</span>
                     {day.isToday && (
-                      <span className="text-[9px] bg-slate-950 text-emerald-300 px-1 py-0.2 rounded font-bold uppercase">
+                      <span className="text-[9px] bg-slate-950 text-emerald-300 px-1 py-0.5 rounded font-bold uppercase">
                         TODAY
                       </span>
                     )}
@@ -674,626 +920,331 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
 
           {/* Table Body: Grouped by Regions with Yellow Regional Divider Rows */}
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-            {allRegions.map((regionName) => {
-              const regionTechs = filteredTechs.filter((t) => t.region === regionName);
-              if (regionTechs.length === 0) return null;
+            {filteredTechs.length === 0 ? (
+              <tr>
+                <td colSpan={daysList.length + 2} className="py-12 text-center">
+                  <div className="flex flex-col items-center justify-center gap-2 text-slate-500 dark:text-slate-400">
+                    <Users className="w-8 h-8 text-slate-400 dark:text-slate-600" />
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      No technicians or projects match the selected criteria.
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      Try choosing another region, clearing your search query, or switching the group filter.
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              allRegions.map((regionName) => {
+                const regionTechs = filteredTechs.filter((t) => t.region === regionName);
+                if (regionTechs.length === 0) return null;
 
-              const regionBaseCameras = regionTechs.reduce((sum, t) => sum + t.cameras, 0);
-              const regionBaseMachines = regionTechs.reduce((sum, t) => sum + t.machines, 0);
+                const regionBaseCameras = regionTechs.reduce((sum, t) => sum + t.cameras, 0);
+                const regionBaseMachines = regionTechs.reduce((sum, t) => sum + t.machines, 0);
 
-              return (
-                <React.Fragment key={`group-${regionName}`}>
-                  {/* Yellow Regional Divider Row Matching Scheduler Matrix */}
-                  <tr className="bg-[#ffff00] text-slate-950 font-black text-xs border-y-2 border-slate-600 select-none">
-                    <td
-                      colSpan={9}
-                      className="px-3 py-1 font-extrabold uppercase tracking-wide border border-slate-600"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <MapPin className="w-3.5 h-3.5 text-slate-950" />
-                          <span className="text-sm font-black">{regionName}</span>
-                          <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded font-mono font-bold">
-                            {regionTechs.length} Technicians
-                          </span>
-                        </div>
-                        <div className="text-[11px] font-mono font-bold flex items-center gap-4 text-slate-950">
-                          <span>Fleet: 📷 {regionBaseCameras} Cameras • ⚙️ {regionBaseMachines} Machines</span>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-
-                  {/* Technician Rows */}
-                  {regionTechs.map((tech) => {
-                    // Equipment stats
-                    const overallStats = getTechOverallEquipmentStats(tech, projects, undefined, undefined, activeWeekId);
-
-                    // Weekly hours calculation for this technician (only counting days with projects)
-                    const techWeeklyCalc = calculateTechWeeklyHours(getEffectiveHoursForTech(tech.name), tech.name);
-
-                    // Unique jobs assigned to this technician
-                    const techAssignedJobs = projects.filter(
-                      (p) => isProjectAssignedToTech(p.technician, tech.name)
-                    );
-
-                    const isTechSearchMatch = Boolean(
-                      activeSearch.trim() && tech.name.toLowerCase().includes(activeSearch.trim().toLowerCase())
-                    );
-
-                    return (
-                      <tr key={tech.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                        {/* 1. Left Technician Column with Colored Gradient Header */}
-                        <td className={`p-2 border border-slate-300 dark:border-slate-700/80 text-xs font-semibold select-none shadow-xs ${
-                          isTechSearchMatch
-                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-500/40 text-yellow-100 dispatch-search-highlight'
-                            : ''
-                        } ${getTechHeaderStyle(tech.colorGroup)}`}>
-                          <div className="flex flex-col gap-1">
-                            {/* Name and Quick Add Action */}
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold tracking-tight text-white flex items-center gap-1.5 truncate">
-                                <span className="text-[13px] truncate">{tech.name}</span>
-                              </span>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {allowCOD && onAssignCODForTech && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onAssignCODForTech(tech.name);
-                                    }}
-                                    title={`Assign projects assigned to ${tech.name} to COD`}
-                                    className="px-1.5 py-0.5 rounded bg-[#ff00bf] hover:bg-[#ff00bf]/80 text-white font-black text-[10px] tracking-wide shadow-xs transition-colors cursor-pointer flex items-center gap-1"
-                                  >
-                                    <span>COD</span>
-                                    {techAssignedJobs.filter((p) => p.group === 'COD' || p.specialBadge === 'COD').length > 0 && (
-                                      <span className="bg-black/40 px-1 rounded-full text-[9px] font-mono">
-                                        {techAssignedJobs.filter((p) => p.group === 'COD' || p.specialBadge === 'COD').length}
-                                      </span>
-                                    )}
-                                  </button>
-                                )}
-                                {onQuickAddJob && (
-                                  <button
-                                    onClick={() => onQuickAddJob(tech.name, 'Monday', 'install')}
-                                    title={`Assign job to ${tech.name}`}
-                                    className="p-1 rounded bg-black/20 hover:bg-black/40 text-white transition-opacity cursor-pointer"
-                                  >
-                                    <Plus className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Team & Unique Job Count */}
-                            <div className="flex items-center justify-between text-[10px] text-slate-200/90 font-mono font-medium">
-                              <span>{tech.team.split(' ')[1] || tech.team}</span>
-                              <span className="bg-black/30 px-1.5 py-0.2 rounded font-bold">
-                                {techAssignedJobs.length} {techAssignedJobs.length === 1 ? 'job' : 'jobs'}
-                              </span>
-                            </div>
-
-                            {/* Camera & Machine Stock Box */}
-                            <div className="pt-1 border-t border-white/20 grid grid-cols-2 gap-1 text-[10px] font-mono">
-                              <div className="bg-black/40 rounded px-1.5 py-0.5 flex flex-col">
-                                <div className="flex items-center gap-1 text-cyan-300 font-bold">
-                                  <Camera className="w-3 h-3 shrink-0" />
-                                  <span>{tech.cameras} Cam</span>
-                                </div>
-                                <div className="text-[9px] text-slate-200 flex items-center justify-between">
-                                  <span className={overallStats.currentAvailableCameras === tech.cameras ? 'text-emerald-300 font-bold' : 'text-amber-300 font-bold'}>
-                                    {overallStats.currentAvailableCameras} avail
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="bg-black/40 rounded px-1.5 py-0.5 flex flex-col">
-                                <div className="flex items-center gap-1 text-amber-300 font-bold">
-                                  <Cog className="w-3 h-3 shrink-0" />
-                                  <span>{tech.machines} Mach</span>
-                                </div>
-                                <div className="text-[9px] text-slate-200 flex items-center justify-between">
-                                  <span className={overallStats.currentAvailableMachines === tech.machines ? 'text-emerald-300 font-bold' : 'text-amber-300 font-bold'}>
-                                    {overallStats.currentAvailableMachines} avail
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
+                return (
+                  <React.Fragment key={`group-${regionName}`}>
+                    {/* Regional Divider Row */}
+                    <tr className="bg-[#ffff00] text-slate-950 font-black text-xs border-y-2 border-slate-600 select-none">
+                      <td
+                        colSpan={daysList.length + 2}
+                        className="px-3 py-1 font-extrabold uppercase tracking-wide border border-slate-600"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-3.5 h-3.5 text-slate-950" />
+                            <span className="text-sm font-black">{regionName}</span>
+                            <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded font-mono font-bold">
+                              {regionTechs.length} Technicians
+                            </span>
                           </div>
-                        </td>
+                          <div className="text-[11px] font-mono font-bold flex items-center gap-4 text-slate-950">
+                            <span>Fleet: 📷 {regionBaseCameras} Cameras • ⚙️ {regionBaseMachines} Machines</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
 
-                        {/* 2-8: 7 Day Columns (White Background Cells) */}
-                        {daysList.map((day) => {
-                          const hoursKey = `${tech.name}_${day.dayName}`;
-                          const rawDayHours = dailyHours[hoursKey] || '0:00:00';
-                          const displayHours =
-                            hoursMode === 'cumulative'
-                              ? techWeeklyCalc.cumulativeRunningByDay[day.dayName]
-                              : rawDayHours;
+                    {/* Technician Rows */}
+                    {regionTechs.map((tech) => {
+                      const overallStats = getTechOverallEquipmentStats(tech, projects, undefined, undefined, activeWeekId);
+                      const techWeeklyCalc = calculateTechWeeklyHours(getEffectiveHoursForTech(tech.name), tech.name);
+                      const techAssignedJobs = projects.filter(
+                        (p) => isProjectAssignedToTech(p.technician, tech.name)
+                      );
 
-                          const installs = getTechJobsForDay(tech.name, day.dayName, 'install');
-                          const batterySwaps = getTechJobsForDay(tech.name, day.dayName, 'battery_swap');
-                          const teardowns = getTechJobsForDay(tech.name, day.dayName, 'teardown');
-                          const totalDayJobs = installs.length + batterySwaps.length + teardowns.length;
-                          const hasProjects = totalDayJobs > 0;
-                          const isEditing = editingKey === hoursKey;
+                      const isTechSearchMatch = Boolean(
+                        activeSearch.trim() && tech.name.toLowerCase().includes(activeSearch.trim().toLowerCase())
+                      );
 
-                          const allDayProjects = [...installs, ...batterySwaps, ...teardowns];
-                          const isDayAllCOD = hasProjects && allDayProjects.every((p) => (p.group || p.specialBadge) === 'COD');
-
-                          return (
-                            <td
-                              key={`cell-${tech.name}-${day.dayName}`}
-                              className="p-1.5 border border-slate-200 dark:border-slate-700/80 align-top bg-white dark:bg-slate-950/80 hover:bg-slate-50 dark:hover:bg-slate-900/60 transition-colors"
-                            >
-                              <div className="flex flex-col gap-1.5 min-h-[90px]">
-                                {/* Top of Cell: Option per day per tech (COD) + Daily Hours (only shown if day has projects) */}
-                                <div className="flex items-center justify-between gap-1 pb-1 border-b border-slate-200 dark:border-slate-800">
-                                  {/* COD button per day per tech */}
-                                  {allowCOD ? (
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          onToggleDayGroup?.(tech.name, day.dayName, 'COD');
-                                        }}
-                                        title={`Assign ${tech.name}'s ${day.dayName} projects to COD`}
-                                        className={`px-1 py-0.5 rounded text-[9px] font-black transition-all cursor-pointer ${
-                                          isDayAllCOD
-                                            ? 'bg-[#ff00bf] text-white ring-1 ring-white shadow-xs'
-                                            : 'text-slate-400 dark:text-slate-500 hover:text-[#ff00bf] hover:bg-[#ff00bf]/15'
-                                        }`}
-                                      >
-                                        COD
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <span className="text-[9px] font-mono text-slate-400">{day.dayName.slice(0, 3)}</span>
+                      return (
+                        <tr key={tech.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                          {/* 1. Left Technician Column */}
+                          <td className={`p-2 border border-slate-300 dark:border-slate-700/80 text-xs font-semibold select-none shadow-sm ${
+                            isTechSearchMatch
+                              ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-500/40 text-yellow-100 dispatch-search-highlight'
+                              : ''
+                          } ${getTechHeaderStyle(tech.colorGroup)}`}>
+                            <div className="flex flex-col gap-1">
+                              {/* Name and Quick Actions */}
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold tracking-tight text-white flex items-center gap-1.5 truncate">
+                                  <span className="text-[13px] truncate">{tech.name}</span>
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {allowCOD && onAssignCODForTech && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onAssignCODForTech(tech.name);
+                                      }}
+                                      title={`Assign projects assigned to ${tech.name} to COD`}
+                                      className="px-1.5 py-0.5 rounded bg-[#ff00bf] hover:bg-[#ff00bf]/80 text-white font-black text-[10px] tracking-wide shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                                    >
+                                      <span>COD</span>
+                                      {techAssignedJobs.filter((p) => p.group === 'COD' || p.specialBadge === 'COD').length > 0 && (
+                                        <span className="bg-black/40 px-1 rounded-full text-[9px] font-mono">
+                                          {techAssignedJobs.filter((p) => p.group === 'COD' || p.specialBadge === 'COD').length}
+                                        </span>
+                                      )}
+                                    </button>
                                   )}
+                                  {onQuickAddJob && (
+                                    <button
+                                      onClick={() => onQuickAddJob(tech.name, 'Monday', 'install')}
+                                      title={`Assign job to ${tech.name}`}
+                                      className="p-1 rounded bg-black/20 hover:bg-black/40 text-white transition-opacity cursor-pointer"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
 
-                                  {/* Hours display: Don't put hours on days without projects */}
-                                  {isEditing ? (
-                                    <div className="flex items-center gap-1 w-full justify-end">
-                                      <input
-                                        type="text"
-                                        autoFocus
-                                        value={editingValue}
-                                        onChange={(e) => setEditingValue(e.target.value)}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') {
+                              {/* Team & Unique Job Count */}
+                              <div className="flex items-center justify-between text-[10px] text-slate-200/90 font-mono font-medium">
+                                <span>{tech.team.split(' ')[1] || tech.team}</span>
+                                <span className="bg-black/30 px-1.5 py-0.5 rounded font-bold">
+                                  {techAssignedJobs.length} {techAssignedJobs.length === 1 ? 'job' : 'jobs'}
+                                </span>
+                              </div>
+
+                              {/* Camera & Machine Stock Box */}
+                              <div className="pt-1 border-t border-white/20 grid grid-cols-2 gap-1 text-[10px] font-mono">
+                                <div className="bg-black/40 rounded px-1.5 py-0.5 flex flex-col">
+                                  <div className="flex items-center gap-1 text-cyan-300 font-bold">
+                                    <Camera className="w-3 h-3 shrink-0" />
+                                    <span>{tech.cameras} Cam</span>
+                                  </div>
+                                  <div className="text-[9px] text-slate-200 flex items-center justify-between">
+                                    <span className={overallStats.currentAvailableCameras === tech.cameras ? 'text-emerald-300 font-bold' : 'text-amber-300 font-bold'}>
+                                      {overallStats.currentAvailableCameras} avail
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="bg-black/40 rounded px-1.5 py-0.5 flex flex-col">
+                                  <div className="flex items-center gap-1 text-amber-300 font-bold">
+                                    <Cog className="w-3 h-3 shrink-0" />
+                                    <span>{tech.machines} Mach</span>
+                                  </div>
+                                  <div className="text-[9px] text-slate-200 flex items-center justify-between">
+                                    <span className={overallStats.currentAvailableMachines === tech.machines ? 'text-emerald-300 font-bold' : 'text-amber-300 font-bold'}>
+                                      {overallStats.currentAvailableMachines} avail
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* 2-8: 7 Day Columns */}
+                          {daysList.map((day) => {
+                            const hoursKey = `${tech.name}_${day.dayName}`;
+                            const rawDayHours = dailyHours[hoursKey] || '0:00:00';
+                            const displayHours =
+                              hoursMode === 'cumulative'
+                                ? techWeeklyCalc.cumulativeRunningByDay[day.dayName]
+                                : rawDayHours;
+
+                            const dayJobs = getTechDayJobs(tech.name, day.dayName);
+                            const installs = dayJobs.installs;
+                            const batterySwaps = dayJobs.batterySwaps;
+                            const teardowns = dayJobs.teardowns;
+
+                            const totalDayJobs = installs.length + batterySwaps.length + teardowns.length;
+                            const hasProjects = totalDayJobs > 0;
+                            const isEditing = editingKey === hoursKey;
+
+                            const allDayProjects = [...installs, ...batterySwaps, ...teardowns];
+                            const isDayAllCOD = hasProjects && allDayProjects.every((p) => (p.group || p.specialBadge) === 'COD');
+
+                            return (
+                              <td
+                                key={`cell-${tech.name}-${day.dayName}`}
+                                className="p-1.5 border border-slate-200 dark:border-slate-700/80 align-top bg-white dark:bg-slate-950/80 hover:bg-slate-50 dark:hover:bg-slate-900/60 transition-colors"
+                              >
+                                <div className="flex flex-col gap-1.5 min-h-[90px]">
+                                  {/* Top of Cell: COD Toggle & Daily Hours */}
+                                  <div className="flex items-center justify-between gap-1 pb-1 border-b border-slate-200 dark:border-slate-800">
+                                    {allowCOD ? (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onToggleDayGroup?.(tech.name, day.dayName, 'COD');
+                                          }}
+                                          title={`Assign ${tech.name}'s ${day.dayName} projects to COD`}
+                                          className={`px-1 py-0.5 rounded text-[9px] font-black transition-all cursor-pointer ${
+                                            isDayAllCOD
+                                              ? 'bg-[#ff00bf] text-white ring-1 ring-white shadow-sm'
+                                              : 'text-slate-400 dark:text-slate-500 hover:text-[#ff00bf] hover:bg-[#ff00bf]/15'
+                                          }`}
+                                        >
+                                          COD
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <span className="text-[9px] font-mono text-slate-400">{day.dayName.slice(0, 3)}</span>
+                                    )}
+
+                                    {/* Hours display */}
+                                    {isEditing ? (
+                                      <div className="flex items-center gap-1 w-full justify-end">
+                                        <input
+                                          type="text"
+                                          autoFocus
+                                          value={editingValue}
+                                          onChange={(e) => setEditingValue(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              updateDailyHours(hoursKey, editingValue);
+                                              setEditingKey(null);
+                                            } else if (e.key === 'Escape') {
+                                              setEditingKey(null);
+                                            }
+                                          }}
+                                          className="w-16 bg-slate-100 dark:bg-slate-900 border border-blue-500 text-slate-900 dark:text-white font-mono font-bold text-xs px-1 py-0.5 rounded focus:outline-none"
+                                          placeholder="0:00:00"
+                                        />
+                                        <button
+                                          onClick={() => {
                                             updateDailyHours(hoursKey, editingValue);
                                             setEditingKey(null);
-                                          } else if (e.key === 'Escape') {
-                                            setEditingKey(null);
-                                          }
-                                        }}
-                                        className="w-16 bg-slate-100 dark:bg-slate-900 border border-blue-500 text-slate-900 dark:text-white font-mono font-bold text-xs px-1 py-0.5 rounded focus:outline-none"
-                                        placeholder="0:00:00"
-                                      />
-                                      <button
+                                          }}
+                                          className="p-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer"
+                                        >
+                                          <Check className="w-3 h-3" />
+                                        </button>
+                                        <button
+                                          onClick={() => setEditingKey(null)}
+                                          className="p-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    ) : hasProjects ? (
+                                      <div
                                         onClick={() => {
-                                          updateDailyHours(hoursKey, editingValue);
-                                          setEditingKey(null);
+                                          setEditingKey(hoursKey);
+                                          setEditingValue(rawDayHours);
                                         }}
-                                        className="p-0.5 rounded bg-emerald-600 text-white hover:bg-emerald-500 cursor-pointer"
+                                        title="Click to edit daily hours"
+                                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-bold cursor-pointer transition-all ${
+                                          rawDayHours !== '0:00:00'
+                                            ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-800 dark:text-cyan-200 border border-blue-200 dark:border-blue-700/60 hover:border-blue-400 shadow-sm'
+                                            : 'bg-slate-100 dark:bg-slate-900/60 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-800/80 hover:text-slate-700 dark:hover:text-slate-300'
+                                        }`}
                                       >
-                                        <Check className="w-3 h-3" />
-                                      </button>
-                                      <button
-                                        onClick={() => setEditingKey(null)}
-                                        className="p-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+                                        <Clock className="w-3 h-3 text-blue-600 dark:text-cyan-400 shrink-0" />
+                                        <span>{displayHours}</span>
+                                        <Edit2 className="w-2.5 h-2.5 opacity-40 hover:opacity-100 ml-0.5" />
+                                      </div>
+                                    ) : (
+                                      <span
+                                        onClick={() => {
+                                          setEditingKey(hoursKey);
+                                          setEditingValue(rawDayHours);
+                                        }}
+                                        title="No projects scheduled (Click to add hours if needed)"
+                                        className="text-slate-300 dark:text-slate-600 text-[10px] font-mono cursor-pointer hover:text-slate-400 px-1"
                                       >
-                                        <X className="w-3 h-3" />
-                                      </button>
-                                    </div>
-                                  ) : hasProjects ? (
-                                    <div
-                                      onClick={() => {
-                                        setEditingKey(hoursKey);
-                                        setEditingValue(rawDayHours);
-                                      }}
-                                      title="Click to edit daily hours"
-                                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-mono font-bold cursor-pointer transition-all ${
-                                        rawDayHours !== '0:00:00'
-                                          ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-800 dark:text-cyan-200 border border-blue-200 dark:border-blue-700/60 hover:border-blue-400 shadow-xs'
-                                          : 'bg-slate-100 dark:bg-slate-900/60 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-800/80 hover:text-slate-700 dark:hover:text-slate-300'
-                                      }`}
-                                    >
-                                      <Clock className="w-3 h-3 text-blue-600 dark:text-cyan-400 shrink-0" />
-                                      <span>{displayHours}</span>
-                                      <Edit2 className="w-2.5 h-2.5 opacity-40 hover:opacity-100 ml-0.5" />
-                                    </div>
-                                  ) : (
-                                    <span
-                                      onClick={() => {
-                                        setEditingKey(hoursKey);
-                                        setEditingValue(rawDayHours);
-                                      }}
-                                      title="No projects scheduled (Click to add hours if needed)"
-                                      className="text-slate-300 dark:text-slate-600 text-[10px] font-mono cursor-pointer hover:text-slate-400 px-1"
-                                    >
-                                      —
-                                    </span>
-                                  )}
-                                </div>
+                                        —
+                                      </span>
+                                    )}
+                                  </div>
 
-                                {/* Scheduled Jobs Cards - Clean Format Without Cancelled / Strikethrough */}
-                                <div className="space-y-1">
-                                  {/* Installs (Green) */}
-                                  {installs.map((p) => {
-                                    const pGroup = p.group || p.specialBadge;
-                                    const assignedTechs = splitTechnicianNames(p.technician);
-                                    const coTechs = assignedTechs.filter(
-                                      (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
-                                    );
-                                    const q = activeSearch.trim().toLowerCase();
-                                    const isJobMatch = Boolean(
-                                      q &&
-                                      (
-                                        p.id.toLowerCase().includes(q) ||
-                                        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
-                                        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
-                                        (p.technician && p.technician.toLowerCase().includes(q)) ||
-                                        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
-                                        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q)))
-                                      )
-                                    );
-
-                                    return (
-                                      <div
+                                  {/* Scheduled Jobs Cards */}
+                                  <div className="space-y-1">
+                                    {installs.map((p) => (
+                                      <DispatchJobCard
                                         key={`inst-${p.id}`}
-                                        onClick={() => onSelectProject(p)}
-                                        className={`p-1.5 rounded text-[11px] border border-emerald-500/80 hover:bg-emerald-100 dark:hover:bg-emerald-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
-                                          isJobMatch
-                                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
-                                            : 'bg-emerald-50 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100'
-                                        }`}
-                                      >
-                                        {/* Row 1: Badges ON TOP (INSTALL, COD, PRIORITY) */}
-                                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                                          <div className="flex items-center gap-1 shrink-0 flex-wrap">
-                                            {allowCOD && pGroup === 'COD' && (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-xs">
-                                                COD
-                                              </span>
-                                            )}
-                                            {pGroup === 'PRIORITY' && (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-purple-600 text-white tracking-wider shadow-xs">
-                                                PRIORITY
-                                              </span>
-                                            )}
-                                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-emerald-600 text-white tracking-wider font-bold shadow-xs">
-                                              INSTALL
-                                            </span>
-                                          </div>
-                                        </div>
+                                        project={p}
+                                        eventType="install"
+                                        technicianName={tech.name}
+                                        allowCOD={allowCOD}
+                                        isSearchMatch={isProjectSearchMatch(p)}
+                                        onSelect={onSelectProject}
+                                        onOpenNotes={handleOpenNotes}
+                                      />
+                                    ))}
 
-                                        {/* Row 2: Project Number with Full Space */}
-                                        <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
-                                          <ArrowDownCircle className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                                          <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
-                                            {p.projectNumber || p.id}
-                                          </span>
-                                        </div>
-                                        {/* Row 2.5: Grouped Locations Display Format */}
-                                        {(() => {
-                                          const locListStr = formatLocationList(p, tech.name);
-                                          if (!locListStr) return null;
-                                          return (
-                                            <div className="text-[9px] font-mono font-semibold tracking-tight text-emerald-800 dark:text-emerald-300">
-                                              • Loc: {locListStr}
-                                            </div>
-                                          );
-                                        })()}
+                                    {batterySwaps.map((p) => (
+                                      <DispatchJobCard
+                                        key={`swap-${p.id}`}
+                                        project={p}
+                                        eventType="battery_swap"
+                                        technicianName={tech.name}
+                                        allowCOD={allowCOD}
+                                        isSearchMatch={isProjectSearchMatch(p)}
+                                        onSelect={onSelectProject}
+                                        onOpenNotes={handleOpenNotes}
+                                      />
+                                    ))}
 
-                                        {/* Row 3: Co-assigned technicians if any */}
-                                        {coTechs.length > 0 && (
-                                          <div className="flex items-center mt-0.5">
-                                            <span
-                                              title={`Co-assigned with ${coTechs.join(', ')}`}
-                                              className="px-1 py-0.2 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
-                                            >
-                                              👥 Co: {coTechs.join(', ')}
-                                            </span>
-                                          </div>
-                                        )}
-
-                                        {/* Row 4: Replace location with option to add notes (Left) + Equipment count (Right) */}
-                                        <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
-                                          {p.schedulerNotes ? (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => handleOpenNotes(e, p)}
-                                              title={`Note: ${p.schedulerNotes} (Click to edit)`}
-                                              className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
-                                            >
-                                              <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                                              <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
-                                              <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
-                                            </button>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => handleOpenNotes(e, p)}
-                                              title="Add note for this project"
-                                              className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
-                                            >
-                                              <FileText className="w-2.5 h-2.5 shrink-0" />
-                                              <span>+ Add Note</span>
-                                            </button>
-                                          )}
-
-                                          <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-300 font-bold shrink-0 ml-auto">
-                                            {p.equipmentCount > 0 ? `-${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* Battery Swaps (Sky Blue) */}
-                                  {batterySwaps.map((p) => {
-                                    const pGroup = p.group || p.specialBadge;
-                                    const assignedTechs = splitTechnicianNames(p.technician);
-                                    const coTechs = assignedTechs.filter(
-                                      (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
-                                    );
-                                    const q = activeSearch.trim().toLowerCase();
-                                    const isJobMatch = Boolean(
-                                      q &&
-                                      (
-                                        p.id.toLowerCase().includes(q) ||
-                                        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
-                                        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
-                                        (p.technician && p.technician.toLowerCase().includes(q)) ||
-                                        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
-                                        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q)))
-                                      )
-                                    );
-
-                                    return (
-                                      <div
-                                        key={`bat-${p.id}`}
-                                        onClick={() => onSelectProject(p)}
-                                        className={`p-1.5 rounded text-[11px] border border-sky-500/80 hover:bg-sky-100 dark:hover:bg-sky-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
-                                          isJobMatch
-                                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
-                                            : 'bg-sky-50 dark:bg-sky-950/90 text-sky-950 dark:text-sky-100'
-                                        }`}
-                                      >
-                                        {/* Row 1: Badges ON TOP (SWAP, COD, PRIORITY) */}
-                                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                                          <div className="flex items-center gap-1 shrink-0 flex-wrap">
-                                            {allowCOD && pGroup === 'COD' && (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-xs">
-                                                COD
-                                              </span>
-                                            )}
-                                            {pGroup === 'PRIORITY' && (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-purple-600 text-white tracking-wider shadow-xs">
-                                                PRIORITY
-                                              </span>
-                                            )}
-                                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-sky-500 text-slate-950 tracking-wider font-bold shadow-xs">
-                                              SWAP
-                                            </span>
-                                          </div>
-                                        </div>
-
-                                        {/* Row 2: Project Number with Full Space */}
-                                        <div className="flex items-center gap-1 font-mono font-bold text-slate-900 dark:text-white min-w-0">
-                                          <RefreshCw className="w-2.5 h-2.5 text-sky-600 dark:text-sky-400 shrink-0" />
-                                          <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
-                                            {p.projectNumber || p.id}
-                                          </span>
-                                        </div>
-                                        {/* Row 2.5: Grouped Locations Display Format */}
-                                        {(() => {
-                                          const locListStr = formatLocationList(p, tech.name);
-                                          if (!locListStr) return null;
-                                          return (
-                                            <div className="text-[9px] font-mono font-semibold tracking-tight text-sky-800 dark:text-sky-300">
-                                              • Loc: {locListStr}
-                                            </div>
-                                          );
-                                        })()}
-
-                                        {/* Row 3: Co-assigned technicians if any */}
-                                        {coTechs.length > 0 && (
-                                          <div className="flex items-center mt-0.5">
-                                            <span
-                                              title={`Co-assigned with ${coTechs.join(', ')}`}
-                                              className="px-1 py-0.2 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
-                                            >
-                                              👥 Co: {coTechs.join(', ')}
-                                            </span>
-                                          </div>
-                                        )}
-
-                                        {/* Row 4: Replace location with option to add notes (Left) + Equipment count (Right) */}
-                                        <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
-                                          {p.schedulerNotes ? (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => handleOpenNotes(e, p)}
-                                              title={`Note: ${p.schedulerNotes} (Click to edit)`}
-                                              className="flex-1 min-w-0 max-w-[130px] flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
-                                            >
-                                              <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                                              <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
-                                              <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
-                                            </button>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => handleOpenNotes(e, p)}
-                                              title="Add note for this project"
-                                              className="flex items-center gap-1 text-[8.5px] text-slate-500 dark:text-slate-400 hover:text-cyan-700 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 hover:border-cyan-500 transition-colors cursor-pointer"
-                                            >
-                                              <FileText className="w-2.5 h-2.5 shrink-0" />
-                                              <span>+ Add Note</span>
-                                            </button>
-                                          )}
-
-                                          <span className="font-mono text-[10px] text-sky-700 dark:text-sky-300 font-bold shrink-0 ml-auto">
-                                            {p.equipmentCount > 0 ? `-${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* Teardowns (Violet) */}
-                                  {teardowns.map((p) => {
-                                    const pGroup = p.group || p.specialBadge;
-                                    const assignedTechs = splitTechnicianNames(p.technician);
-                                    const coTechs = assignedTechs.filter(
-                                      (t) => t.toLowerCase() !== tech.name.trim().toLowerCase()
-                                    );
-                                    const q = activeSearch.trim().toLowerCase();
-                                    const isJobMatch = Boolean(
-                                      q &&
-                                      (
-                                        p.id.toLowerCase().includes(q) ||
-                                        (p.projectNumber && p.projectNumber.toLowerCase().includes(q)) ||
-                                        (p.cityState && p.cityState.toLowerCase().includes(q)) ||
-                                        (p.technician && p.technician.toLowerCase().includes(q)) ||
-                                        (p.locationId && p.locationId.toLowerCase().includes(q)) ||
-                                        (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(q)))
-                                      )
-                                    );
-
-                                    return (
-                                      <div
+                                    {teardowns.map((p) => (
+                                      <DispatchJobCard
                                         key={`td-${p.id}`}
-                                        onClick={() => onSelectProject(p)}
-                                        className={`p-1.5 rounded text-[11px] border border-violet-400 dark:border-violet-500/80 hover:bg-violet-200/80 dark:hover:bg-violet-900 shadow-sm transition-all cursor-pointer group/card relative flex flex-col gap-0.5 ${
-                                          isJobMatch
-                                            ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-bold shadow-xl shadow-yellow-500/50 scale-[1.02] z-10 dispatch-search-highlight'
-                                            : 'bg-violet-100/70 dark:bg-violet-950/90 text-violet-950 dark:text-violet-100'
-                                        }`}
-                                      >
-                                        {/* Row 1: Badges ON TOP (TEARDOWN, ROLLOVER TD, COD, PRIORITY) + Equipment Count Top Right */}
-                                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                                          <div className="flex items-center gap-1 shrink-0 flex-wrap">
-                                            {allowCOD && pGroup === 'COD' && (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-[#ff00bf] text-white tracking-wider shadow-xs">
-                                                COD
-                                              </span>
-                                            )}
-                                            {pGroup === 'PRIORITY' && (
-                                              <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-purple-600 text-white tracking-wider shadow-xs">
-                                                PRIORITY
-                                              </span>
-                                            )}
-                                            {isTeardownRollover(p) ? (
-                                              <span
-                                                title={`Rollover Teardown from previous week install on ${p.installDay}`}
-                                                className="teardown-badge px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-950 text-white tracking-wider border border-white/40 shadow-xs"
-                                              >
-                                                ROLLOVER TD 🔄
-                                              </span>
-                                            ) : (
-                                              <span className="teardown-badge px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-violet-950/90 text-white tracking-wider font-black shadow-xs border border-white/40">
-                                                TEARDOWN
-                                              </span>
-                                            )}
-                                          </div>
-
-                                          {/* Equipment count on top right */}
-                                          <span className="teardown-equip-delta font-mono text-[10px] text-white font-black shrink-0 ml-auto tracking-wide">
-                                            {p.equipmentCount > 0 ? `+${p.equipmentCount} ${p.equipmentType === 'Machine' ? 'MACH' : 'CAMS'}` : ''}
-                                          </span>
-                                        </div>
-
-                                        {/* Row 2: Project Number with Full Space */}
-                                        <div className="flex items-center gap-1 font-mono font-black text-violet-950 dark:text-white min-w-0">
-                                          <ArrowUpCircle className="w-2.5 h-2.5 text-violet-800 dark:text-violet-400 shrink-0" />
-                                          <span className="truncate text-[11px]" title={`${p.id}${p.cityState ? ` • ${p.cityState}` : ''}`}>
-                                            {p.projectNumber || p.id}
-                                          </span>
-                                        </div>
-                                        {/* Row 2.5: Grouped Locations Display Format */}
-                                        {(() => {
-                                          const locListStr = formatLocationList(p, tech.name);
-                                          if (!locListStr) return null;
-                                          return (
-                                            <div className="text-[9px] font-mono font-semibold tracking-tight text-violet-900 dark:text-violet-200">
-                                              • Loc: {locListStr}
-                                            </div>
-                                          );
-                                        })()}
-
-                                        {/* Row 3: Co-assigned technicians if any */}
-                                        {coTechs.length > 0 && (
-                                          <div className="flex items-center mt-0.5">
-                                            <span
-                                              title={`Co-assigned with ${coTechs.join(', ')}`}
-                                              className="px-1 py-0.2 rounded text-[8px] font-semibold bg-cyan-900/40 text-cyan-800 dark:text-cyan-200 border border-cyan-500/30 truncate"
-                                            >
-                                              👥 Co: {coTechs.join(', ')}
-                                            </span>
-                                          </div>
-                                        )}
-
-                                        {/* Row 4: Replace location with option to add notes */}
-                                        <div className="flex items-center justify-between text-[10px] gap-1 mt-0.5">
-                                          {p.schedulerNotes ? (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => handleOpenNotes(e, p)}
-                                              title={`Note: ${p.schedulerNotes} (Click to edit)`}
-                                              className="flex-1 min-w-0 flex items-center gap-1 text-[8.5px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors cursor-pointer text-left group/note"
-                                            >
-                                              <FileText className="w-2.5 h-2.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                                              <span className="truncate flex-1 font-sans">{p.schedulerNotes}</span>
-                                              <Edit3 className="w-2 h-2 shrink-0 opacity-60 group-hover/note:opacity-100 text-amber-600 dark:text-amber-300" />
-                                            </button>
-                                          ) : (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => handleOpenNotes(e, p)}
-                                              title="Add note for this project"
-                                              className="flex items-center gap-1 text-[8.5px] text-violet-200 hover:text-white dark:text-slate-400 dark:hover:text-cyan-300 px-1.5 py-0.5 rounded border border-dashed border-violet-300/50 dark:border-slate-700 hover:border-white transition-colors cursor-pointer"
-                                            >
-                                              <FileText className="w-2.5 h-2.5 shrink-0" />
-                                              <span>+ Add Note</span>
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+                                        project={p}
+                                        eventType="teardown"
+                                        technicianName={tech.name}
+                                        allowCOD={allowCOD}
+                                        isSearchMatch={isProjectSearchMatch(p)}
+                                        onSelect={onSelectProject}
+                                        onOpenNotes={handleOpenNotes}
+                                      />
+                                    ))}
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                          );
-                        })}
+                              </td>
+                            );
+                          })}
 
-                        {/* 9: Running Hours & OT Column */}
-                        <td className="p-2 border border-slate-300 dark:border-slate-700/80 align-top bg-slate-50 dark:bg-slate-950 text-xs select-none">
-                          <div className="flex flex-col gap-1 text-center">
-                            <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
-                              {techWeeklyCalc.weeklyTotalStr}
-                            </span>
-                            {techWeeklyCalc.isOvertime && (
-                              <span className="inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-500 text-slate-950 tracking-wider">
-                                <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
-                                <span>OVERTIME</span>
+                          {/* 9: Running Hours & OT Column */}
+                          <td className="p-2 border border-slate-300 dark:border-slate-700/80 align-top bg-slate-50 dark:bg-slate-950 text-xs select-none">
+                            <div className="flex flex-col gap-1 text-center">
+                              <span className="font-mono font-black text-sm text-slate-900 dark:text-white">
+                                {techWeeklyCalc.weeklyTotalStr}
                               </span>
-                            )}
-                            <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
-                              {techWeeklyCalc.daysWorked} {techWeeklyCalc.daysWorked === 1 ? 'day' : 'days'} worked
+                              {techWeeklyCalc.isOvertime && (
+                                <span className="inline-flex items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-500 text-slate-950 tracking-wider">
+                                  <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                  <span>OVERTIME</span>
+                                </span>
+                              )}
+                              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
+                                {techWeeklyCalc.daysWorked} {techWeeklyCalc.daysWorked === 1 ? 'day' : 'days'} worked
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </React.Fragment>
-              );
-            })}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })
+            )}
           </tbody>
 
           {/* Table Footer: Fleet Daily Totals */}
@@ -1321,7 +1272,7 @@ export const DispatchTimesheetMatrix: React.FC<DispatchTimesheetMatrixProps> = (
       {/* Notes Modal for Dispatch View */}
       {notesModalProject && (
         <div
-          className="fixed inset-0 bg-black/75 backdrop-blur-xs z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={() => setNotesModalProject(null)}
         >
           <div
