@@ -4,7 +4,14 @@ import { formatDateTimeSent } from './dateTimeFormat';
 import { calculateBatterySwaps } from './batterySwapEngine';
 import { TECHNICIANS } from '../data/technicians';
 import { INITIAL_PROJECTS } from '../data/initialProjects';
-import { splitTechnicianNames, cleanTechName, matchKnownTechnician } from './technicianUtils';
+import {
+  splitTechnicianNames,
+  cleanTechName,
+  matchKnownTechnician,
+  DIRECT_PROJECT_TECHNICIAN_PRIMARY_KEYS,
+  extractLocationNumber,
+  parseTechnicianInputString,
+} from './technicianUtils';
 
 const PREV_DAYS: Record<WeekDay, WeekDay> = {
   Sunday: 'Saturday',
@@ -619,6 +626,15 @@ export function extractDateStr(value?: string): string | undefined {
  * Deterministically assigns a regional technician based on geographical market and city/state
  */
 export function assignRegionalTech(cityState: string, projectId: string): string {
+  // Direct primary key mapping check (per PDF Section 4)
+  if (projectId) {
+    for (const [key, tech] of Object.entries(DIRECT_PROJECT_TECHNICIAN_PRIMARY_KEYS)) {
+      if (projectId.includes(key) || projectId.startsWith(key)) {
+        return tech;
+      }
+    }
+  }
+
   const lower = (cityState || '').toLowerCase();
   // Colorado Team (Green)
   if (
@@ -1218,7 +1234,8 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
   };
 
   const projectsById = new Map<string, Project>();
-  const projectsByParentKey = new Map<string, Project>();
+  const projectsByGroupKey = new Map<string, Project>();
+  const parentKeyCount = new Map<string, number>();
 
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
@@ -1347,6 +1364,26 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
       }
     }
 
+    // Direct Primary Key mapping check (PDF Section 4: Fix Misallocated Technician Assignment Bug)
+    if (DIRECT_PROJECT_TECHNICIAN_PRIMARY_KEYS[parentProjectNumber]) {
+      assignedTech = DIRECT_PROJECT_TECHNICIAN_PRIMARY_KEYS[parentProjectNumber];
+    } else {
+      for (const [key, tech] of Object.entries(DIRECT_PROJECT_TECHNICIAN_PRIMARY_KEYS)) {
+        if (parentProjectNumber.includes(key) || parentProjectNumber.startsWith(key) || id.includes(key)) {
+          assignedTech = tech;
+          break;
+        }
+      }
+    }
+
+    // Validation Rule: Re-query technician list to ensure explicit string matches for assigned names (Gavin and Gilliam)
+    if (assignedTech && assignedTech !== 'Unassigned') {
+      const match = matchKnownTechnician(assignedTech);
+      if (match) {
+        assignedTech = match.name;
+      }
+    }
+
     const opsStatus = normalizeOpsStatus(opsStatusCol !== -1 ? row[opsStatusCol] : undefined, assignedTech);
     const scheduleStatus = normalizeScheduleStatus(schedStatusCol !== -1 ? row[schedStatusCol] : undefined);
     
@@ -1363,18 +1400,19 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
     }
 
     // Parse Location IDs and Locations count from CSV
-    // "No. of Locations does not match. Refer and sync to the number of Location ID from the specific Project ID from csv"
+    // "Extract the location number by taking the substring after the last dash (-) of the Location ID (e.g., 26-480132-001 -> 001)."
     let rawLocationIdStr = locationIdCol !== -1 && row[locationIdCol] ? row[locationIdCol].trim() : '';
     let parsedLocationIds: string[] = [];
     if (rawLocationIdStr) {
       const parts = rawLocationIdStr.split(/[,;\/\n]+/).map((s) => s.trim()).filter(Boolean);
-      if (parts.length > 0) {
-        parsedLocationIds = parts;
-      }
+      parsedLocationIds = parts.map(extractLocationNumber).filter(Boolean);
     }
 
-    if (extractedLocSuffix && !parsedLocationIds.includes(extractedLocSuffix)) {
-      parsedLocationIds.unshift(extractedLocSuffix);
+    if (extractedLocSuffix) {
+      const cleanLocSuffix = extractLocationNumber(extractedLocSuffix);
+      if (cleanLocSuffix && !parsedLocationIds.includes(cleanLocSuffix)) {
+        parsedLocationIds.unshift(cleanLocSuffix);
+      }
     }
 
     let locationsCount = 1;
@@ -1564,8 +1602,15 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
     const formattedDateSent = chosenDateSent ? formatDateTimeSent(chosenDateSent) : '';
     const formattedAuditDate = rawAuditDate ? formatDateTimeSent(rawAuditDate) : formattedDateSent;
 
-    const existingProj = projectsByParentKey.get(parentKey) || projectsById.get(id);
+    // Grouping: Group location numbers under their respective Parent Project ID.
+    // Locations installed on the same day are grouped beneath their project ID for clean space efficiency (PDF Section 3)
+    const groupKey = `${parentKey}__${installDay || 'no_inst'}__${teardownDay || 'no_td'}`;
+    const existingProj = projectsByGroupKey.get(groupKey);
     if (!existingProj) {
+      const existingGroupCount = parentKeyCount.get(parentKey) || 0;
+      parentKeyCount.set(parentKey, existingGroupCount + 1);
+      const groupId = existingGroupCount === 0 ? id : `${id} (Group ${existingGroupCount + 1})`;
+
       const techUnits: Record<string, number> = {};
       const techLocations: Record<string, string[]> = {};
       if (assignedTech && assignedTech !== 'Unassigned') {
@@ -1588,7 +1633,8 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
       }
 
       const newProj: Project = {
-        id,
+        id: groupId,
+        projectNumber: parentProjectNumber,
         cityState,
         opsStatus,
         scheduleStatus,
@@ -1625,8 +1671,8 @@ export function parseAirtableCSV(csvContent: string): ParseAirtableResult {
         lastUpdated: new Date().toISOString(),
       };
 
-      projectsById.set(id, newProj);
-      projectsByParentKey.set(parentKey, newProj);
+      projectsById.set(groupId, newProj);
+      projectsByGroupKey.set(groupKey, newProj);
     } else {
       // Multiple rows / locations for the SAME Project ID!
       // If the existing project didn't have a valid cityState, update it
