@@ -18,6 +18,7 @@ import {
   isProjectAssignedToTech,
   splitTechnicianNames,
   sanitizeTechnicianRoster,
+  formatLocationList,
 } from '../utils/technicianUtils';
 import {
   Info,
@@ -161,26 +162,31 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
   };
 
   const getDisplayProjectHeader = (proj: Project) => {
+    let projectNumber = proj.projectNumber;
     const id = (proj.id || '').trim();
     const rawCity = (proj.cityState && proj.cityState !== 'Unspecified') ? proj.cityState.trim() : '';
 
-    // Match patterns like "26-260111 City, ST"
-    const match = id.match(/^(\d{2}-\d{4,6}[A-Za-z0-9\-_]*)\s+(.+)$/);
-    if (match) {
-      return {
-        projectNumber: match[1],
-        city: match[2],
-      };
-    }
-
-    if (rawCity) {
-      if (id.toLowerCase().includes(rawCity.toLowerCase())) {
-        return { projectNumber: id, city: '' };
+    if (!projectNumber) {
+      const match = id.match(/^(\d{2}-\d{4,6}[A-Za-z0-9\-_]*)/);
+      if (match) {
+        projectNumber = match[1];
+      } else {
+        projectNumber = id;
       }
-      return { projectNumber: id, city: rawCity };
     }
 
-    return { projectNumber: id, city: '' };
+    // Clean up city to avoid showing (Group X)
+    let city = rawCity;
+    if (!city) {
+      const match = id.match(/^(\d{2}-\d{4,6}[A-Za-z0-9\-_]*)\s+(.+)$/);
+      if (match) {
+        city = match[2].replace(/\(Group\s+\d+\)/i, '').trim();
+      }
+    } else {
+      city = city.replace(/\(Group\s+\d+\)/i, '').trim();
+    }
+
+    return { projectNumber, city };
   };
 
   const toggleCodGroup = (groupId: string) => {
@@ -218,13 +224,29 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
         (p) =>
           isProjectAssignedToTech(p.technician, tech.name) &&
           (p.id.toLowerCase().includes(term) ||
+            (p.projectNumber && p.projectNumber.toLowerCase().includes(term)) ||
             p.cityState.toLowerCase().includes(term) ||
-            (p.technician && p.technician.toLowerCase().includes(term)))
+            (p.technician && p.technician.toLowerCase().includes(term)) ||
+            (p.locationId && p.locationId.toLowerCase().includes(term)) ||
+            (p.locationIds && p.locationIds.some((loc) => loc.toLowerCase().includes(term))))
       );
       return matchesTech || hasMatchingProject;
     }
     return true;
   });
+
+  // Auto-scroll to matching project card or technician row when searching (Focus View per PDF Section 2)
+  React.useEffect(() => {
+    if (searchTerm && searchTerm.trim().length >= 2) {
+      const timer = setTimeout(() => {
+        const matchEl = document.querySelector('.search-highlight-target');
+        if (matchEl) {
+          matchEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+        }
+      }, 120);
+      return () => clearTimeout(timer);
+    }
+  }, [searchTerm]);
 
   const allRegions = React.useMemo(() => {
     const presentRegions = Array.from(new Set(filteredTechs.map((t) => t.region || 'TX (Dallas)')));
@@ -710,6 +732,9 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                   {/* Technician Rows for this region */}
                   {regionTechs.map((tech) => {
                     const isTechSelected = selectedTechFilter === tech.name;
+                    const isTechSearchMatch = Boolean(
+                      searchTerm.trim() && tech.name.toLowerCase().includes(searchTerm.trim().toLowerCase())
+                    );
 
                     // Calculate tech inventory timeline and current stats
                     const timeline = calculateTechInventoryTimeline(tech, projects, specialAssignments, activeWeekId);
@@ -731,7 +756,11 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                           onClick={() => onFilterSync?.({ tech: tech.name })}
                           title={`Click to filter Monitoring Sheet to ${tech.name}`}
                           className={`p-1.5 sm:p-2 border border-slate-700/80 text-xs font-semibold select-none shadow-sm cursor-pointer ${
-                            isTechSelected ? 'ring-2 ring-cyan-400 ring-inset' : ''
+                            isTechSearchMatch
+                              ? 'ring-4 ring-yellow-400 border-2 border-yellow-300 bg-yellow-500/30 text-yellow-200 search-highlight-target'
+                              : isTechSelected
+                              ? 'ring-2 ring-cyan-400 ring-inset'
+                              : ''
                           } ${getTechHeaderStyle(tech.colorGroup)}`}
                         >
                           <div className="flex flex-col gap-1">
@@ -964,13 +993,27 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                               {(() => {
                                 const renderCard = (proj: Project, eventType: MatrixEventType) => {
                                   const badge = getOpsStatusBadge(proj.opsStatus);
-                                  const isHighlighted = highlightedProjectId === proj.id;
+                                  const term = searchTerm.trim().toLowerCase();
+                                  const isCardSearchMatch = Boolean(
+                                    term &&
+                                    (
+                                      proj.id.toLowerCase().includes(term) ||
+                                      (proj.projectNumber && proj.projectNumber.toLowerCase().includes(term)) ||
+                                      (proj.cityState && proj.cityState.toLowerCase().includes(term)) ||
+                                      (proj.technician && proj.technician.toLowerCase().includes(term)) ||
+                                      (proj.locationId && proj.locationId.toLowerCase().includes(term)) ||
+                                      (proj.locationIds && proj.locationIds.some((loc) => loc.toLowerCase().includes(term)))
+                                    )
+                                  );
+                                  const isHighlighted = highlightedProjectId === proj.id || isCardSearchMatch;
                                   const equipType = getProjectEquipmentType(proj);
                                   const isInstall = eventType === 'install';
                                   const isBatterySwap = eventType === 'battery_swap';
                                   const isTeardown = eventType === 'teardown';
 
-                                  const cardTheme = isHighlighted
+                                  const cardTheme = isCardSearchMatch
+                                    ? 'bg-yellow-400 text-slate-950 border-2 border-yellow-300 font-bold ring-4 ring-yellow-400 shadow-xl shadow-yellow-500/50 scale-[1.03] z-20 search-highlight-target'
+                                    : isHighlighted
                                     ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold ring-2 ring-amber-300 shadow-md scale-[1.02]'
                                     : isInstall
                                     ? 'bg-emerald-950/80 text-emerald-100 border-emerald-500/80 hover:bg-emerald-900/90 ring-1 ring-emerald-500/30'
@@ -1105,16 +1148,41 @@ export const SchedulerMatrix: React.FC<SchedulerMatrixProps> = ({
                                                 }`}
                                               ></span>
                                               <div className="min-w-0 flex-1 flex items-baseline gap-1.5 flex-wrap">
-                                                <span className="font-bold tracking-tight text-white text-[11px] truncate" title={proj.id}>
+                                                <span
+                                                  className={`font-bold tracking-tight text-[11px] truncate ${
+                                                    isCardSearchMatch || isHighlighted ? 'text-slate-950 font-black' : 'text-white'
+                                                  }`}
+                                                  title={proj.id}
+                                                >
                                                   {projectNumber}
                                                 </span>
                                                 {city && (
-                                                  <span className="text-slate-200 text-[10px] font-sans truncate font-medium" title={city}>
+                                                  <span
+                                                    className={`text-[10px] font-sans truncate font-medium ${
+                                                      isCardSearchMatch || isHighlighted ? 'text-slate-900 font-semibold' : 'text-slate-200'
+                                                    }`}
+                                                    title={city}
+                                                  >
                                                     {city}
                                                   </span>
                                                 )}
                                               </div>
                                             </div>
+
+                                            {/* Row 2.5: Grouped Locations Display Format (per PDF specification: "• Loc: 001, 002, 003") */}
+                                            {(() => {
+                                              const locListStr = formatLocationList(proj, tech.name);
+                                              if (!locListStr) return null;
+                                              return (
+                                                <div
+                                                  className={`mt-0.5 flex items-center gap-1 text-[9.5px] font-mono font-semibold tracking-wide ${
+                                                    isCardSearchMatch || isHighlighted ? 'text-slate-950 font-bold' : 'text-cyan-200'
+                                                  }`}
+                                                >
+                                                  <span>• Loc: {locListStr}</span>
+                                                </div>
+                                              );
+                                            })()}
 
                                             {/* Row 3: Co-assigned with placed below the project number */}
                                             {coTechs.length > 0 && (
